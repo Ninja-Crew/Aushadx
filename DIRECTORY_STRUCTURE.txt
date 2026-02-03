@@ -1,0 +1,86 @@
+AushadX - High Level Directory Structure
+==========================================
+
+.
+├── README.md
+├── apps/
+│   └── profile-client/
+│       ├── package.json
+│       ├── README.md
+│       ├── public/
+│       │   └── index.html
+│       └── src/
+│           ├── api.js
+│           ├── App.js
+│           ├── index.css
+│           ├── index.js
+│           └── components/
+│               ├── Login.js
+│               ├── ProfileDelete.js
+│               ├── ProfileUpdate.js
+│               ├── ProfileView.js
+│               ├── Signup.js
+│               └── TokenOperations.js
+├── services/
+│   ├── api-server/
+│   │   ├── src/
+│   │   │   ├── app.js
+│   │   │   ├── index.js
+│   │   │   └── middleware/
+│   │   │       └── verifyToken.js
+│   │   └── test/
+│   │       └── auth_integration_test.js
+│   ├── medicine-analyzer/
+│   │   ├── package.json
+│   │   ├── README.md
+│   │   └── src/
+│   │       ├── app.js
+│   │       ├── index.js
+│   │       ├── config/
+│   │       │   ├── env.js
+│   │       │   └── logger.js
+│   │       ├── controllers/
+│   │       │   └── analyzeController.js
+│   │       ├── routes/
+│   │       │   └── analyzeRoutes.js
+│   │       └── services/
+│   │           ├── embeddingClient.js
+│   │           ├── llmClient.js
+│   │           └── ragClient.js
+│   └── profile-manager/
+│       ├── docker-compose.yaml
+│       ├── Dockerfile
+│       ├── package.json
+│       ├── README.md
+│       ├── src/
+│       │   ├── app.js
+│       │   ├── index.js
+│       │   ├── server.js
+│       │   ├── config/
+│       │   │   ├── db.js
+│       │   │   ├── env.js
+│       │   │   └── logger.js
+│       │   ├── controllers/
+│       │   │   ├── authController.js
+│       │   │   └── profileController.js
+│       │   ├── middleware/
+│       │   │   ├── authMiddleware.js
+│       │   │   └── errorMiddleware.js
+│       │   ├── models/
+│       │   │   └── User.js
+│       │   ├── routes/
+│       │   │   ├── authRoutes.js
+│       │   │   └── profileRoutes.js
+│       │   ├── services/
+│       │   │   ├── authService.js
+│       │   │   └── profileService.js
+│       │   └── utils/
+│       │       ├── jwt.js
+│       │       ├── password.js
+│       │       └── response.js
+│       └── tests/
+│           ├── auth.test.js
+│           ├── profile.test.js
+│           └── utils.test.js
+└── vectordbScript/
+    └── script.py
