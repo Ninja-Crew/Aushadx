@@ -29,7 +29,7 @@ pc = Pinecone(api_key=PINECONE_API_KEY)
 
 EMBEDDING_MODEL = "text-embedding-004"
 OUTPUT_DIMENSION = 768 
-BATCH_SIZE = 90
+BATCH_SIZE = 100
 SLEEP_INTERVAL = 0.1
 
 logging.basicConfig(level=logging.INFO)

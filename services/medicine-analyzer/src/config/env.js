@@ -1,3 +1,5 @@
+import "dotenv/config"
+
 export const env = {
   NODE_ENV: process.env.NODE_ENV || "development",
   PORT: process.env.PORT ? Number(process.env.PORT) : 5000,
@@ -11,5 +13,6 @@ export const env = {
   PINECONE_API_KEY: process.env.PINECONE_API_KEY || "",
   PINECONE_INDEX: process.env.PINECONE_INDEX || "",
 };
+
 
 export default env;
