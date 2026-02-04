@@ -1,10 +1,7 @@
 import app from "./app.js";
 
-const port = process.env.API_PORT || 4000;
+const PORT = process.env.PORT || 3001;
 
-const server = app.listen(port, () => {
-  // eslint-disable-next-line no-console
-  console.log(`API server listening on ${port}`);
+app.listen(PORT, () => {
+  console.log(`API Gateway running on port ${PORT}`);
 });
-
-export default server;

@@ -105,3 +105,37 @@ pids/
 # Parcel related files
 dist/
 .parcel-cache/
+
+
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Debug/Temp files
+response.json
+schema_debug.json
+test/env-repro.js
+
+# Testing
+coverage/
+
+# Misc
+.DS_Store
+Thumbs.db
+
+
+profile-client/

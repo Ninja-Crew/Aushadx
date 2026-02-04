@@ -20,13 +20,18 @@ async function getIndex() {
 }
 
 async function search(query, top_k = 10) {
-  const idx = await getIndex();
-  if (!idx) return [];
-
-  const vector = await embeddingClient.embedText(query);
-
   try {
-    const results = await idx.query({ vector, top_k, includeMetadata: true });
+    const idx = await getIndex();
+    if (!idx) return [];
+  
+    const vector = await embeddingClient.embedText(query);
+  
+    const results = await idx.query({
+      vector,
+      topK: Number(top_k),   // ✅ camelCase + integer
+      includeMetadata: true,
+    });
+
     return (
       results.matches?.map((match) => ({
         text: match.metadata?.text,
@@ -34,7 +39,7 @@ async function search(query, top_k = 10) {
       })) || []
     );
   } catch (err) {
-    logger.error("Error searching Pinecone index", err);
+    logger.error("Error searching Pinecone index or embedding", err);
     return [];
   }
 }

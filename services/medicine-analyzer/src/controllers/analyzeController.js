@@ -1,83 +1,115 @@
 import llmClient from "../services/llmClient.js";
 import logger from "../config/logger.js";
 import env from "../config/env.js";
+import ragClient from "../services/ragClient.js";
 
-const medicineSchema = {
-  type: "object",
-  properties: {
-    drug_name: { type: "string" },
-    indications: { type: "array", items: { type: "string" } },
-    recommended_dosage: {
-      type: "object",
-      properties: {
-        amount: { type: "number" },
-        unit: { type: "string" },
-        notes: { type: "string" },
-      },
-    },
-    typical_dosage_range: { type: "string" },
-    side_effects: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          likelihood: { type: "string" },
-          notes: { type: "string" },
-        },
-      },
-    },
-    interactions: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          substance: { type: "string" },
-          severity: { type: "string" },
-          notes: { type: "string" },
-        },
-      },
-    },
-    contraindications: { type: "array", items: { type: "string" } },
-    risks_of_wrong_dosage: { type: "array", items: { type: "string" } },
-    recommendations: { type: "array", items: { type: "string" } },
-    confidence: {
-      type: "object",
-      properties: {
-        level: { type: "string", enum: ["low", "medium", "high"] },
-        rationale: { type: "string" },
-      },
-    },
-    references: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          source: { type: "string" },
-          context_index: { type: "number" },
-        },
-      },
-    },
-  },
-};
+import { z } from "zod";
 
-function buildPrompt(user_data, medicalHistory) {
+const medicineSchema = z.object({
+  drug_name: z.string().describe("Name of the medicine"),
+  indications: z.array(z.string()).describe("Symptoms or conditions this medicine treats"),
+  recommended_dosage: z.object({
+    amount: z.number().nullable().describe("Numerical amount"),
+    unit: z.string().nullable().describe("Unit (mg, ml, etc)"),
+    notes: z.string().describe("Dosage instructions")
+  }).describe("Recommended dosage information"),
+  typical_dosage_range: z.string().describe("Typical dosage range string"),
+  side_effects: z.array(z.object({
+    name: z.string(),
+    likelihood: z.string(),
+    notes: z.string()
+  })).describe("Potential side effects"),
+  interactions: z.array(z.object({
+    substance: z.string(),
+    severity: z.string(),
+    notes: z.string()
+  })).describe("Interactions within food or other drugs"),
+  contraindications: z.array(z.string()).describe("Conditions where this medicine should not be used"),
+  risks_of_wrong_dosage: z.array(z.string()).describe("Risks associated with incorrect dosage"),
+  recommendations: z.array(z.string()).describe("General recommendations or warnings"),
+  confidence: z.object({
+    level: z.enum(["low", "medium", "high"]),
+    rationale: z.string()
+  }).describe("Confidence in the analysis"),
+  references: z.array(z.object({
+    source: z.string(),
+    context_index: z.number()
+  })).describe("References to RAG context used")
+});
+
+function buildPrompt(user_data, medicalHistory, ragContext) {
+  let contextSection = "";
+
+  if (ragContext && ragContext.length > 0) {
+    contextSection = `
+Retrieved Medical Knowledge (RAG Details):
+${ragContext.map(r => `- ${r.text}`).join("\n")}
+`;
+  }
+
   const userDesc = medicalHistory
-    ? `Patient medical history:\n${medicalHistory}\n\nOCR text:\n${user_data.ocr_text || user_data.text}`
-    : `OCR text:\n${user_data.ocr_text || user_data.text}`;
+    ? `Patient medical history:
+${medicalHistory}
 
-  const q = `Analyze the medicine information from the OCR text and evaluate side effects, correct dosage, risks of wrong dosage, contraindications, and interactions with the patient's medical history.`;
+OCR text:
+${user_data.ocr_text || user_data.text}`
+    : `OCR text:
+${user_data.ocr_text || user_data.text}`;
 
-  // Instruction asks for machine-readable JSON with specific fields
-  return [
-    `You are a clinical assistant. Use ONLY the provided contexts to answer. Do NOT hallucinate facts outside the contexts unless asked; explicitly state when information is missing or uncertain.`,
-    `Patient input:\n${userDesc}\n\n`,
-    `Task: ${q}\n\n`,
-    `Output format: Provide a single valid JSON object only (no surrounding explanatory text) that conforms to the provided schema.`,
-    `If a value is unknown, use null or an empty array.`,
-    `Respond now with the JSON object.`,
-  ].join("\n");
+  return `
+You are a clinical assistant.
+
+Use retrieved medical knowledge when it is relevant and reliable.
+
+If the retrieved context is irrelevant, incomplete, or insufficient,
+you may rely on general medical knowledge.
+
+Do NOT fabricate facts.
+If information cannot be determined:
+- Return empty arrays for array fields
+- Return null for nullable fields
+- Return empty strings where appropriate
+
+Clearly reflect uncertainty in the "confidence" field.
+
+${contextSection}
+
+Patient Input:
+${userDesc}
+
+TASK:
+Extract structured information about the medicine strictly using the following schema field names:
+
+- drug_name
+- indications
+- recommended_dosage (object with amount, unit, notes)
+- typical_dosage_range
+- side_effects
+- interactions
+- contraindications
+- risks_of_wrong_dosage
+- recommendations
+- confidence (object with level and rationale)
+- references
+
+If the OCR text indicates "FOR VETERINARY USE ONLY" and the patient is human,
+reflect this appropriately in:
+- contraindications
+- recommendations
+- confidence rationale
+
+IMPORTANT OUTPUT RULES:
+
+You must return ONLY valid JSON.
+The JSON keys MUST exactly match the schema field names above.
+Do not rename fields.
+Do not add new fields.
+Do not omit required fields.
+
+Return nothing except the JSON object.
+`;
 }
+
 
 export async function analyze(req, res) {
   const { medicine_data } = req.body || {};
@@ -90,13 +122,6 @@ export async function analyze(req, res) {
   try {
     logger.info("Performing Gemini-based medicine label analysis");
 
-    const incomingAuth =
-      req.headers && (req.headers.authorization || req.headers.Authorization);
-    const propagateHeaders =
-      incomingAuth && env.PROPAGATE_AUTH
-        ? { Authorization: incomingAuth }
-        : undefined;
-
     let medicalHistory = null;
     if (env.PROFILE_SERVICE_URL && user_id) {
       try {
@@ -104,10 +129,7 @@ export async function analyze(req, res) {
           `${env.PROFILE_SERVICE_URL.replace(/\/$/, "")}/profile/${user_id}/medical-info`,
           {
             method: "GET",
-            headers: Object.assign(
-              { "Content-Type": "application/json" },
-              propagateHeaders || {},
-            ),
+            headers: { "Content-Type": "application/json" },
           },
         );
         if (profileRes.ok) {
@@ -128,7 +150,19 @@ export async function analyze(req, res) {
       }
     }
 
-    const prompt = buildPrompt(medicine_data, medicalHistory);
+    // RAG Retrieval
+    let ragResults = [];
+    try {
+        const queryText = medicine_data.ocr_text || medicine_data.text;
+        if (queryText) {
+            logger.info("Querying RAG for context");
+            ragResults = await ragClient.search(queryText);
+        }
+    } catch (err) {
+        logger.warn("RAG retrieval failed, proceeding without it", err);
+    }
+
+    const prompt = buildPrompt(medicine_data, medicalHistory, ragResults);
 
     logger.info("Calling Gemini with structured output for medicine analysis");
     const analysis = await llmClient.callGeminiStructured(
