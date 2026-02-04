@@ -1,33 +1,67 @@
-# medicine-analyzer
+# Medicine Analyzer 🧠
 
-Service that takes raw medical text, computes embeddings, searches a pre-built index for relevant context, and runs a retrieval-augmented generation (RAG) LLM call to produce a concise, context-aware answer.
+> **The Brain of AushadX.**
+> *Generative AI. Vector Search. Medical Insight.*
 
-Environment
+---
 
-- `EMBEDDING_API_URL` – HTTP endpoint that accepts `{ input: string }` and returns embeddings.
-- `LLM_API_URL` – HTTP endpoint that accepts `{ prompt: string }` and returns model output.
-- `INDEX_DB_URL` – HTTP endpoint base for index DB; this service calls `POST ${INDEX_DB_URL}/search` with `{ vector, top_k }` and expects `{ results: [{ id, text, score }]}`.
-- `PROFILE_SERVICE_URL` – optional base URL of the profile service (e.g., profile-manager). When provided and `PROPAGATE_AUTH=true`, medicine-analyzer can fetch the user's stored medical history from `${PROFILE_SERVICE_URL}/profile` by forwarding the incoming `Authorization` header.
-- `PROPAGATE_AUTH` – when `true`, medicine-analyzer forwards the incoming `Authorization` header to downstream services (profile/index/LLM). Use with secure internal networks only.
-- `GEMINI_API_KEY` – API key for Google Gemini. Required for `/api/health-analytics` endpoint which uses Gemini's structured output feature.
+## 📖 Overview
 
-Run locally
+The **Medicine Analyzer** service brings intelligence to AushadX. It allows users to upload raw medical text or reports and receive structured, easy-to-understand insights.
 
-1. Copy `.env.example` to `.env` and adjust endpoints.
-2. Install dependencies and start:
+It leverages a **Retrieval-Augmented Generation (RAG)** pipeline, combining the reasoning power of **Google Gemini** with a specialized medical knowledge index to provide accurate, context-aware answers.
 
-```powershell
-cd services/medicine-analyzer
-npm install
-npm run start
+## ⚡ Key Capabilities
+
+- **RAG Engine**:
+  - Embeds user queries using high-dimensional vectors.
+  - Searches a local Vector Store for relevant medical contexts.
+  - Synthesizes an answer using the LLM, grounded in true medical data.
+- **Structured Health Analytics**:
+  - Generates JSON-structured dietary plans, exercise routines, and risk assessments.
+- **Medical Report Parsing**: Understands complex medical terminology.
+
+---
+
+## 🔌 API Endpoints
+
+Base URL: `/api` (routed via Gateway `/analyze`)
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `POST` | `/analyze` | RAG Chat. Body: `{ text: "Is ibuprofen safe with..." }` |
+| `POST` | `/health-analytics` | Comprehensive Report. Body: `{ user_data: {...} }` |
+
+---
+
+## 🛠️ Configuration
+
+### Environment Variables
+Create a `.env` file in `services/medicine-analyzer`:
+
+```env
+PORT=8000
+GEMINI_API_KEY=your_google_gemini_api_key
+
+# RAG / Vector DB Configuration
+EMBEDDING_API_URL=http://localhost:8001/embed # If using external embedder
+INDEX_DB_URL=http://localhost:8002/search     # If using external vector DB
 ```
 
-API
+---
 
-- POST `/api/analyze` – body: `{ text: string, question?: string, top_k?: number }`. Returns `{ success: true, answer, contexts }`.
-- POST `/api/health-analytics` – body: `{ user_data: object, medical_reports_data?: object, top_k?: number, user_id?: string }`. Returns comprehensive health analytics with structured output from Gemini, including dietary recommendations, exercise plans, risk factors, and personalized health insights based on RAG-enhanced medical knowledge.
+## 🚀 Usage
 
-Notes
+### Install Dependencies
+```bash
+npm install
+```
 
-- The service expects external endpoints for embeddings, index search, and LLM inference. These can be simple HTTP adapters in front of your model-serving infra.
-- The code is intentionally minimal and defensive about response shapes; adapt clients to your exact model server payloads.
+### Run Locally
+```bash
+npm run start
+# Runs on http://localhost:8000
+```
+
+### Notes on LLM
+This service uses Google's Generative AI SDK. Ensure you have a valid `GEMINI_API_KEY` with permissions for the `gemini-pro` model.
