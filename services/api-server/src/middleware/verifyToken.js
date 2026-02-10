@@ -1,45 +1,46 @@
 import jwt from "jsonwebtoken";
-import fs from "fs";
-import path from "path";
+import jwksClient from "jwks-rsa";
+import dotenv from "dotenv";
 
-function loadPublicKey() {
-  const p = process.env.JWT_PUBLIC_KEY_PATH;
-  if (p) {
-    try {
-      const resolved = path.isAbsolute(p) ? p : path.resolve(p);
-      return fs.readFileSync(resolved, "utf8");
-    } catch (err) {
-      // fall through to raw env
+dotenv.config();
+
+// Initialize the JWKS client
+// Point to Profile Manager's JWKS endpoint
+const client = jwksClient({
+  jwksUri: process.env.JWKS_URI || "http://localhost:3000/.well-known/jwks.json",
+  cache: true,
+  rateLimit: true,
+  jwksRequestsPerMinute: 5
+});
+
+// Helper to get the signing key
+function getKey(header, callback) {
+  client.getSigningKey(header.kid, function(err, key) {
+    if (err) {
+        console.error("Error fetching signing key", err);
+        return callback(err, null);
     }
-  }
-  if (process.env.JWT_PUBLIC_KEY) return process.env.JWT_PUBLIC_KEY;
-  return null;
+    const signingKey = key.getPublicKey();
+    callback(null, signingKey);
+  });
 }
-
-const PUBLIC_KEY = loadPublicKey();
 
 export default function verifyToken(req, res, next) {
   const auth =
     req.headers && (req.headers.authorization || req.headers.Authorization);
-  if (!auth || !auth.startsWith("Bearer "))
+  if (!auth)
     return res
       .status(401)
       .json({ success: false, message: "Missing Authorization" });
+  
   const token = auth.split(" ")[1];
-  if (!PUBLIC_KEY)
-    return res
-      .status(500)
-      .json({
-        success: false,
-        message: "Public key not configured on API server",
-      });
-  try {
-    const payload = jwt.verify(token, PUBLIC_KEY, { algorithms: ["RS256"] });
-    req.user = payload;
-    return next();
-  } catch (err) {
-    return res
-      .status(401)
-      .json({ success: false, message: "Invalid token", details: err.message });
-  }
+  
+  // Verify using key from JWKS
+  jwt.verify(token, getKey, { algorithms: ["RS256"] }, (err, decoded) => {
+      if (err) {
+          return res.status(401).json({ success: false, message: "Invalid token", details: err.message });
+      }
+      req.user = decoded;
+      next();
+  });
 }
