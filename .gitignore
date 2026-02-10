@@ -84,7 +84,6 @@ test-results/
 *.h5
 vectors/
 embeddings/
-models/
 
 # Logs
 logs/
