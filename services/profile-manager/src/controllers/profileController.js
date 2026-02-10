@@ -6,7 +6,7 @@ export async function getProfile(req, res) {
     const userId = req.params.user_id || req.user.sub;
     const user = await profileService.getProfile(userId);
     if (!user) return error(res, "Profile not found", 404);
-    return success(res, { profile: user });
+    return success(res, {user});
   } catch (err) {
     return error(res, "Failed to get profile", 500, err.message);
   }

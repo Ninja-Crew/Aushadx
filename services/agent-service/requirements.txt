@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+python-dotenv
+langchain
+langgraph
+langchain-google-genai
+google-generativeai
+pydantic
+pytest
+pytest-asyncio
+httpx
+pytest-mock
+requests-mock
