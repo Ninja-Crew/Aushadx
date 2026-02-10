@@ -30,11 +30,16 @@ Your goal is to help users manage their medications, schedule reminders, and und
 You have access to tools for analyzing medicine text, scheduling reminders, and checking user profiles. 
 Be helpful, empathetic, and concise. Always prioritize patient safety and advise consulting a doctor for medical advice."""
 
+from langchain_core.runnables import RunnableConfig
+
 # Define Nodes
-def call_model(state: AgentState):
+def call_model(state: AgentState, config: RunnableConfig):
     messages = state["messages"]
+    user_id = config["configurable"].get("thread_id", "unknown")
+    
     # Prepend system message to the current interaction
-    prompt = [SystemMessage(content=SYSTEM_PROMPT)] + messages
+    system_message = f"{SYSTEM_PROMPT}\nCurrent User ID: {user_id}"
+    prompt = [SystemMessage(content=system_message)] + messages
     response = llm_with_tools.invoke(prompt)
     return {"messages": [response]}
 

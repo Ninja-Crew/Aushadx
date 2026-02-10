@@ -12,8 +12,21 @@ def test_analyze_medicine_success(monkeypatch):
         m.post("http://mock-analyzer/analyze", json={"status": "success", "data": {"name": "Test Med"}})
         
         # Use the tool from the imported module
-        result = tools.analyze_medicine.invoke({"text": "sample text"})
+        result = tools.analyze_medicine.invoke({"text": "sample text", "user_id": "test_user"})
         assert result == {"status": "success", "data": {"name": "Test Med"}}
+        assert m.last_request.json() == {"medicine_data": {"text": "sample text"}, "userId": "test_user"}
+
+def test_get_medicine_details_success(monkeypatch):
+    # Patch the global variable in the module
+    monkeypatch.setattr(tools, "MEDICINE_ANALYZER_URL", "http://mock-analyzer")
+    
+    with requests_mock.Mocker() as m:
+        m.post("http://mock-analyzer/analyze", json={"status": "success", "data": "info"})
+        
+        result = tools.get_medicine_details.invoke({"medicine_name": "Aspirin", "user_id": "user123"})
+        
+        assert result == {"status": "success", "data": "info"}
+        assert m.last_request.json() == {"medicine_data": {"text": "Information about Aspirin"}, "userId": "user123"}
 
 def test_schedule_medicine_success(monkeypatch):
     # Patch the global variable in the module

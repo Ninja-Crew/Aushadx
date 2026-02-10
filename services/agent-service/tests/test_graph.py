@@ -22,6 +22,6 @@ def test_call_model(mock_llm):
     mock_response = AIMessage(content="Test Response")
     mock_llm.invoke.return_value = mock_response
     state = {"messages": [HumanMessage(content="Hello")]}
-    result = call_model(state)
+    result = call_model(state, config={"configurable": {"thread_id": "test_user"}})
     assert len(result["messages"]) == 1
     assert result["messages"][0].content == "Test Response"

@@ -15,9 +15,10 @@ PROFILE_MANAGER_URL = os.getenv("PROFILE_MANAGER_URL", "http://localhost:3003")
 
 class MedicineAnalysisInput(BaseModel):
     text: str = Field(description="The text content or OCR result to be analyzed for medicine details.")
+    user_id: str = Field(description="The unique identifier of the user.")
 
 @tool("analyze_medicine", args_schema=MedicineAnalysisInput)
-def analyze_medicine(text: str) -> Dict[str, Any]:
+def analyze_medicine(text: str, user_id: str) -> Dict[str, Any]:
     """
     Analyzes raw text or OCR data to extract structured medicine information.
     
@@ -31,7 +32,7 @@ def analyze_medicine(text: str) -> Dict[str, Any]:
     """
     try:
         url = f"{MEDICINE_ANALYZER_URL}/analyze"
-        payload = {"medicine_data": {"text": text}}
+        payload = {"medicine_data": {"text": text}, "userId": user_id}
         response = requests.post(url, json=payload)
         response.raise_for_status()
         return response.json()
@@ -41,9 +42,10 @@ def analyze_medicine(text: str) -> Dict[str, Any]:
 
 class GetMedicineDetailsInput(BaseModel):
     medicine_name: str = Field(description="The name of the medicine to retrieve details for.")
+    user_id: str = Field(description="The unique identifier of the user.")
 
 @tool("get_medicine_details", args_schema=GetMedicineDetailsInput)
-def get_medicine_details(medicine_name: str) -> Dict[str, Any]:
+def get_medicine_details(medicine_name: str, user_id: str) -> Dict[str, Any]:
     """
     Retrieves detailed information about a specific medicine by name.
     
@@ -53,7 +55,7 @@ def get_medicine_details(medicine_name: str) -> Dict[str, Any]:
     # Note: Assuming medicine-analyzer has a search or detail endpoint. 
     # If not, we might reuse `analyze` with synthesized text or query a different endpoint.
     # For now, let's assume we send it to analyze to get general knowledge or RAG info.
-    return analyze_medicine(text=f"Information about {medicine_name}")
+    return analyze_medicine.invoke({"text": f"Information about {medicine_name}", "user_id": user_id})
 
 class ScheduleMedicineInput(BaseModel):
     user_id: str = Field(description="The unique identifier of the user.")
