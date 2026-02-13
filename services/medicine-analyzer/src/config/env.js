@@ -12,6 +12,8 @@ export const env = {
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || "",
   PINECONE_API_KEY: process.env.PINECONE_API_KEY || "",
   PINECONE_INDEX: process.env.PINECONE_INDEX || "",
+  PINECONE_INDEX_HOST: process.env.PINECONE_INDEX_HOST || "", 
+  PINECONE_NAMESPACE: process.env.PINECONE_NAMESPACE || "",
 };
 
 
