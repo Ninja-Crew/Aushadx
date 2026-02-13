@@ -1,20 +1,38 @@
-import request from "supertest";
-import express from "express";
 import { jest } from "@jest/globals";
+import request from "supertest";
 
 // Mock dependencies
-jest.mock("../src/services/llmClient.js", () => ({
-  callGeminiStructured: jest.fn().mockResolvedValue({
-    drug_name: "Mock Drug",
-    recommendations: ["Take with water"],
-  }),
+jest.unstable_mockModule("../src/services/llmClient.js", () => ({
+  default: {
+    callGeminiStructured: jest.fn().mockResolvedValue({
+      drug_name: "Mock Drug",
+      recommendations: ["Take with water"],
+    }),
+  }
+}));
+
+jest.unstable_mockModule("../src/services/ragClient.js", () => ({
+  default: {
+    search: jest.fn().mockResolvedValue([]),
+  }
+}));
+
+// Mock Env to avoid missing API keys causing issues
+jest.unstable_mockModule("../src/config/env.js", () => ({
+  default: {
+    PORT: 5000,
+    PROFILE_SERVICE_URL: "http://localhost:3001",
+    GEMINI_API_KEY: "test",
+    PINECONE_API_KEY: "test",
+    PINECONE_INDEX: "test",
+  }
 }));
 
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
 
-// Import app
-import app from "../src/app.js";
+// Import app after mocks
+const { default: app } = await import("../src/app.js");
 
 describe("Medicine Analyzer API", () => {
   beforeEach(() => {
