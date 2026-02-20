@@ -4,13 +4,6 @@ import jwt from "jsonwebtoken";
 import { generateKeyPairSync } from "crypto";
 import { jest } from "@jest/globals";
 
-// Mock the proxy middleware to avoid actual network calls or 504s
-jest.mock("http-proxy-middleware", () => ({
-  createProxyMiddleware: jest.fn(() => (req, res, next) => {
-    res.status(200).json({ proxied: true, path: req.originalUrl, headers: req.headers });
-  }),
-}));
-
 // Generate keys for testing
 const { publicKey, privateKey } = generateKeyPairSync("rsa", {
   modulusLength: 2048,
@@ -18,10 +11,27 @@ const { publicKey, privateKey } = generateKeyPairSync("rsa", {
   privateKeyEncoding: { type: "pkcs8", format: "pem" },
 });
 
-process.env.JWT_PUBLIC_KEY = publicKey;
+// Mock jwks-rsa
+jest.unstable_mockModule("jwks-rsa", () => ({
+  default: jest.fn(() => ({
+    getSigningKey: jest.fn((kid, cb) => {
+      // Return the public key wrapped in an object as expected by getSigningKey
+      cb(null, { getPublicKey: () => publicKey });
+    }),
+  })),
+}));
 
-// Import app AFTER setting env and mocking
-import app from "../src/app.js";
+// Mock the proxy middleware for ESM
+jest.unstable_mockModule("http-proxy-middleware", () => ({
+  createProxyMiddleware: jest.fn(() => (req, res, next) => {
+    res.status(200).json({ proxied: true, path: req.originalUrl, url: req.url, headers: req.headers });
+  }),
+}));
+
+process.env.JWT_PUBLIC_KEY = publicKey; // Kept just in case, though likely unused
+
+// Dynamic import after mocking
+const { default: app } = await import("../src/app.js");
 
 describe("API Gateway Auth Rules", () => {
   let validToken;
@@ -74,11 +84,8 @@ describe("API Gateway Auth Rules", () => {
         
         expect(res.statusCode).toBe(200);
         expect(res.body.proxied).toBe(true);
-        // Verify X-User-Id header logic if possible?
-        // The mock proxy prints headers, but http-proxy-middleware `onProxyReq` logic 
-        // happens *inside* the real middleware which we mocked OUT.
-        // So we can't easily test `onProxyReq` logic with this mock.
-        // But we verified the "Gate" works.
+        // Verify userId injected into URL
+        expect(res.body.url).toContain("/user123");
       });
     });
   });
