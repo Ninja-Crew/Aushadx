@@ -40,8 +40,7 @@ describe('Reminder API', () => {
 
   describe('POST / (Create Reminder)', () => {
     it('should create a reminder with frequency X_TIMES_DAILY', async () => {
-      const res = await request(app).post('/').send({
-        userId: 'user1',
+      const res = await request(app).post('/user1').send({
         medicineName: 'Aspirin',
         frequency: 'X_TIMES_DAILY',
         specificTimes: ['08:00', '20:00'],
@@ -53,8 +52,7 @@ describe('Reminder API', () => {
     });
 
     it('should create a reminder with frequency EVERY_X_HOURS', async () => {
-      const res = await request(app).post('/').send({
-        userId: 'user1',
+      const res = await request(app).post('/user1').send({
         medicineName: 'Antibiotic',
         frequency: 'EVERY_X_HOURS',
         frequencyValue: 6
@@ -71,7 +69,7 @@ describe('Reminder API', () => {
         save: jest.fn().mockRejectedValue(new Error(errorMsg))
       }));
 
-      const res = await request(app).post('/').send({ userId: 'user1' });
+      const res = await request(app).post('/user1').send({});
       expect(res.statusCode).toEqual(500);
       expect(res.body.message).toEqual(errorMsg);
     });

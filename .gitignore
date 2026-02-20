@@ -82,6 +82,7 @@ test-results/
 *.pickle
 *.joblib
 *.h5
+indexClear.py
 vectors/
 embeddings/
 
@@ -138,3 +139,5 @@ Thumbs.db
 
 
 profile-client/
+
+keystore.json
