@@ -26,9 +26,10 @@ const calculateEndDate = (startDate, duration, durationValue) => {
 };
 
 export const createReminder = async (req, res) => {
+  const { userId } = req.params;
   try {
     const { 
-      userId, medicineName, dosage, 
+      medicineName, dosage, 
       frequency, frequencyValue, specificWeekDays, specificDayOfMonth, specificTimes,
       duration, durationValue, endDate: requestedEndDate,
       time // Legacy or for ONCE

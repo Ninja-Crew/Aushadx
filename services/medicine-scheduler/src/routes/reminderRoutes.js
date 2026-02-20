@@ -3,7 +3,7 @@ import { createReminder, getReminders, deleteReminder, getMissedReminders } from
 
 const router = express.Router();
 
-router.post('/', createReminder);
+router.post('/:userId', createReminder);
 router.get('/missed/:userId', getMissedReminders); // Important: Place before /:userId to avoid conflict if logic wasn't specific, but here it's fine. 
 // Actually, /:userId matches anything. So if I have /:userId, it might match 'missed' if :userId is a string. 
 // Better standard: /users/:userId/reminders/missed or /reminders/missed?userId=...
