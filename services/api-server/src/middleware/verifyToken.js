@@ -25,6 +25,23 @@ function getKey(header, callback) {
   });
 }
 
+/**
+ * Verifies a JWT token using JWKS.
+ * Returns a Promise that resolves to the decoded token or rejects with an error.
+ * @param {string} token 
+ * @returns {Promise<object>}
+ */
+export const verifyJWT = (token) => {
+  return new Promise((resolve, reject) => {
+    jwt.verify(token, getKey, { algorithms: ["RS256"] }, (err, decoded) => {
+      if (err) {
+        return reject(err);
+      }
+      resolve(decoded);
+    });
+  });
+};
+
 export default function verifyToken(req, res, next) {
   const auth =
     req.headers && (req.headers.authorization || req.headers.Authorization);
@@ -35,12 +52,12 @@ export default function verifyToken(req, res, next) {
   
   const token = auth.split(" ")[1];
   
-  // Verify using key from JWKS
-  jwt.verify(token, getKey, { algorithms: ["RS256"] }, (err, decoded) => {
-      if (err) {
-          return res.status(401).json({ success: false, message: "Invalid token", details: err.message });
-      }
+  verifyJWT(token)
+    .then(decoded => {
       req.user = decoded;
       next();
-  });
+    })
+    .catch(err => {
+      res.status(401).json({ success: false, message: "Invalid token", details: err.message });
+    });
 }
