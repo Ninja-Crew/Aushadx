@@ -20,6 +20,7 @@ load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 INDEX_NAME = os.getenv("PINECONE_INDEX") or "medicine-knowledgebase"
+NAMESPACE = os.getenv("PINECONE_NAMESPACE") or "medicine_kb_v1"
 
 if not GOOGLE_API_KEY or not PINECONE_API_KEY:
     raise ValueError("Missing API keys in .env file")
@@ -29,8 +30,8 @@ pc = Pinecone(api_key=PINECONE_API_KEY)
 
 EMBEDDING_MODEL = "text-embedding-004"
 OUTPUT_DIMENSION = 768 
-BATCH_SIZE = 100
-SLEEP_INTERVAL = 0.1
+BATCH_SIZE = 96
+SLEEP_INTERVAL = 5
 
 logging.basicConfig(level=logging.INFO)
 
@@ -175,17 +176,28 @@ def setup_index():
 # EMBEDDING
 # =========================================================
 
-def generate_embeddings(texts):
-    result = client.models.embed_content(
-        model="text-embedding-004",   # or gemini-embedding-001
-        contents=texts,
-        config=types.EmbedContentConfig(
-            task_type="RETRIEVAL_DOCUMENT",
-            output_dimensionality=OUTPUT_DIMENSION
-        )
-    )
-
-    return [embedding.values for embedding in result.embeddings]
+def generate_embeddings(text):
+    # result = client.models.embed_content(
+    #     model="text-embedding-004",   # or gemini-embedding-001
+    #     contents=texts,
+    #     config=types.EmbedContentConfig(
+    #         task_type="RETRIEVAL_DOCUMENT",
+    #         output_dimensionality=OUTPUT_DIMENSION
+    #     )
+    # )
+    headers = {"Content-Type": "application/json"}
+    url = "http://127.0.0.1:8000/predict"
+    try:
+        response = requests.post(url, headers=headers, data=json.dumps({"text":text}))
+        response.raise_for_status() # raise an exception for http errors (4xx or 5xx)
+        embedding_output = response.json().get("embedding")
+        if not embedding_output:
+            raise ValueError("No embedding found in the response")
+    except Exception as e:
+        logging.error(f"Embedding generation failed: {e}")
+        return None
+    
+    return embedding_output
 
 
 # =========================================================
@@ -198,13 +210,13 @@ def main():
     logging.info("Generating text representation...")
     df["embedding_text"] = df.apply(create_text, axis=1)
 
-    index = setup_index()
+    index = pc.Index(INDEX_NAME)
 
     ids = df["id"].tolist()
     texts = df["embedding_text"].tolist()
     names = df["name"].tolist()
 
-    logging.info("Starting embedding + upsert...")
+    logging.info("Starting direct upsert (Pinecone handles embeddings)...")
 
     for i in tqdm(range(0, len(ids), BATCH_SIZE)):
         batch_ids = ids[i:i + BATCH_SIZE]
@@ -212,25 +224,24 @@ def main():
         batch_names = names[i:i + BATCH_SIZE]
 
         try:
-            embeddings = generate_embeddings(batch_texts)
-
             vectors = [
                 {
                     "id": doc_id,
-                    "values": vector,
-                    "metadata": {"name": name, "text": text}
+                    "name": name,
+                    "text": text  # IMPORTANT: this is what Pinecone embeds
                 }
-                for doc_id, vector, name, text in zip(batch_ids, embeddings, batch_names, batch_texts)
+                for doc_id, name, text
+                in zip(batch_ids, batch_names, batch_texts)
             ]
 
-            index.upsert(vectors=vectors)
+            index.upsert_records(namespace=NAMESPACE, records=vectors)
             time.sleep(SLEEP_INTERVAL)
 
         except Exception as e:
             logging.error(f"Batch {i} failed: {e}")
+            raise e 
 
     logging.info("Ingestion completed successfully.")
-
 
 if __name__ == "__main__":
     main()

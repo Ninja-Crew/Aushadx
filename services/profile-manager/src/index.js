@@ -30,7 +30,7 @@ async function main() {
     process.exit(1);
   }
 
-  const port = env.PORT || process.env.PORT || 3000;
+  const port = process.env.PORT || env.PORT || 3001;
   const server = app.listen(port, () =>
     logger.info(`Server listening on port ${port}`),
   );

@@ -1,3 +1,4 @@
+import logger from "../config/logger.js";
 import {
   GoogleGenAI,
   HarmCategory,
@@ -42,9 +43,9 @@ const safetySettings = [
   },
 ];
 
-async function callGeminiStructured(prompt, zodSchema) {
+async function callGeminiStructured(prompt, zodSchema,retries=3) {
   if (process.env.MOCK_LLM === 'true') {
-    console.log("[MOCK] Returning mock LLM response");
+    logger.info("[MOCK] Returning mock LLM response");
     return {
       drug_name: "Mock Aspirin",
       indications: ["Headache", "Fever"],
@@ -66,28 +67,38 @@ async function callGeminiStructured(prompt, zodSchema) {
     const fs = await import('fs');
     fs.writeFileSync('schema_debug.json', JSON.stringify(jsonSchema, null, 2));
   } catch (e) {
-    console.error("Failed to write schema debug file", e);
+    logger.error("Failed to write schema debug file", e);
   }
 
   // const models = await client.models.list();
   // console.log(JSON.stringify(models, null, 2));
+  let response;
+  let error;
+  for(let i=0;i<retries;i++){ 
+    try{
+      response = await client.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+          ...generationConfig,
+          responseSchema: jsonSchema
+        }
+    });
 
-  const response = await client.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    config: {
-      ...generationConfig,
-      responseSchema: jsonSchema
+      /* console.log("DEBUG: Full Response keys:", Object.keys(response)); */
+      const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) {
+          logger.error("DEBUG: Unexpected response structure:", JSON.stringify(response, null, 2));
+          throw new Error("No text found in LLM response");
+      }
+      const result=JSON.parse(text);
+      return result;
+    }catch(e){
+      logger.error("Error calling Gemini", e);
+      error=e;  
     }
-  });
-
-  /* console.log("DEBUG: Full Response keys:", Object.keys(response)); */
-  const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-      console.error("DEBUG: Unexpected response structure:", JSON.stringify(response, null, 2));
-      throw new Error("No text found in LLM response");
   }
-  return JSON.parse(text);
+  throw error;
 }
 
 export default { callGeminiStructured };

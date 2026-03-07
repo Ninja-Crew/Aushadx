@@ -75,8 +75,7 @@ export async function login(req, res) {
 
 export async function refresh(req, res) {
   try {
-    const { refreshToken } = req.body;
-    const user_id = req.params.user_id;
+    const refreshToken = req.body.refreshToken;
     if (!refreshToken) return error(res, "Missing refresh token", 400);
     let payload;
     try {
@@ -86,7 +85,7 @@ export async function refresh(req, res) {
       return error(res, "Invalid refresh token", 401, err.message);
     }
 
-    const userId = user_id || payload.sub;
+    const userId = payload.sub;
     // ensure user exists
     const user = await User.findById(userId);
     if (!user) return error(res, "User not found", 404);
