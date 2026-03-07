@@ -8,19 +8,23 @@ import {
   Alert, 
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  ScrollView
 } from 'react-native';
 import { login, register } from '../api/auth';
-import { colors, spacing, typography } from '../styles/theme';
-
+import { spacing } from '../styles/theme';
 import { saveToken } from '../utils/storage';
+import { useTheme } from '../context/ThemeContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const LoginScreen = ({ navigation }) => {
+  const { colors } = useTheme();
   const [isLogin, setIsLogin] = useState(true);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const styles = makeStyles(colors);
 
   const handleSubmit = async () => {
     if (!email || !password || (!isLogin && !name)) {
@@ -34,10 +38,21 @@ const LoginScreen = ({ navigation }) => {
       let data;
       if (isLogin) {
         data = await login(email, password);
-        // data structure: { user: {...}, tokens: { accessToken: "...", refreshToken: "..." } }
         await saveToken(data.tokens.access, data.tokens.refresh);
-        // Navigate on success
-        navigation.replace('Dashboard', { token: data.tokens.accessToken, user: data.user });
+
+        // Check if a session route was saved before the token expired
+        const pendingRouteRaw = await AsyncStorage.getItem('@pendingRoute');
+        if (pendingRouteRaw) {
+          try {
+            const { name, params } = JSON.parse(pendingRouteRaw);
+            await AsyncStorage.removeItem('@pendingRoute');
+            navigation.replace(name, { ...params, token: data.tokens.access });
+          } catch {
+            navigation.replace('MainTabs', { token: data.tokens.access, user: data.user });
+          }
+        } else {
+          navigation.replace('MainTabs', { token: data.tokens.access, user: data.user });
+        }
       } else {
         // Prepare signup data
         // Profile service expects: { name, email, password, role: 'patient' }
@@ -59,73 +74,71 @@ const LoginScreen = ({ navigation }) => {
 
   return (
     <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
+      behavior="padding"
+      style={[styles.container, { flex: 1 }]}
     >
-      <View style={styles.formContainer}>
-        <Text style={styles.header}>{isLogin ? 'Welcome Back' : 'Create Account'}</Text>
-        <Text style={styles.subHeader}>
-          {isLogin ? 'Sign in to continue' : 'Sign up to get started'}
-        </Text>
+      <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
+        <View style={styles.formContainer}>
+          <Text style={styles.header}>{isLogin ? 'Welcome Back' : 'Create Account'}</Text>
+          <Text style={styles.subHeader}>
+            {isLogin ? 'Sign in to continue' : 'Sign up to get started'}
+          </Text>
 
-        {!isLogin && (
+          {!isLogin && (
+            <TextInput
+              style={styles.input}
+              placeholder="Full Name"
+              value={name}
+              onChangeText={setName}
+              autoCapitalize="words"
+              placeholderTextColor={colors.textSecondary}
+            />
+          )}
+
           <TextInput
             style={styles.input}
-            placeholder="Full Name"
-            value={name}
-            onChangeText={setName}
-            autoCapitalize="words"
+            placeholder="Email Address"
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+            placeholderTextColor={colors.textSecondary}
           />
-        )}
 
-        <TextInput
-          style={styles.input}
-          placeholder="Email Address"
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize="none"
-          keyboardType="email-address"
-        />
+          <TextInput
+            style={styles.input}
+            placeholder="Password"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            placeholderTextColor={colors.textSecondary}
+          />
 
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
+          <TouchableOpacity 
+            style={styles.button} 
+            onPress={handleSubmit}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>{isLogin ? 'Login' : 'Sign Up'}</Text>
+            )}
+          </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.button} 
-          onPress={handleSubmit}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>{isLogin ? 'Login' : 'Sign Up'}</Text>
-          )}
-        </TouchableOpacity>
-
-        <TouchableOpacity onPress={() => setIsLogin(!isLogin)} style={styles.switchContainer}>
-          <Text style={styles.switchText}>
-            {isLogin ? "Don't have an account? " : "Already have an account? "}
-            <Text style={styles.linkText}>{isLogin ? 'Sign Up' : 'Login'}</Text>
-          </Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-            style={styles.skipButton}
-            onPress={() => navigation.navigate('Agent', { token: 'mock-token' })}
-        >
-             <Text style={styles.skipText}>Skip (Test Agent)</Text>
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity onPress={() => setIsLogin(!isLogin)} style={styles.switchContainer}>
+            <Text style={styles.switchText}>
+              {isLogin ? "Don't have an account? " : "Already have an account? "}
+              <Text style={styles.linkText}>{isLogin ? 'Sign Up' : 'Login'}</Text>
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -143,24 +156,26 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   header: {
-    ...typography.header,
+    fontSize: 24, fontWeight: 'bold',
     marginBottom: spacing.s,
     textAlign: 'center',
     color: colors.primary,
   },
   subHeader: {
-    ...typography.caption,
+    fontSize: 14,
+    color: colors.textSecondary,
     marginBottom: spacing.l,
     textAlign: 'center',
   },
   input: {
-    backgroundColor: colors.background,
+    backgroundColor: colors.inputBg,
     borderRadius: 8,
     padding: spacing.m,
     marginBottom: spacing.m,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: 'transparent',
+    borderColor: colors.border,
+    color: colors.text,
   },
   button: {
     backgroundColor: colors.primary,
@@ -169,31 +184,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: spacing.s,
   },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  switchContainer: {
-    marginTop: spacing.l,
-    alignItems: 'center',
-  },
-  switchText: {
-    ...typography.body,
-    fontSize: 14,
-  },
-  linkText: {
-    color: colors.primary,
-    fontWeight: 'bold',
-  },
-  skipButton: {
-      marginTop: spacing.xl,
-      alignSelf: 'center',
-  },
-  skipText: {
-      color: colors.textSecondary,
-      fontSize: 12
-  }
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  switchContainer: { marginTop: spacing.l, alignItems: 'center' },
+  switchText: { fontSize: 14, color: colors.text },
+  linkText: { color: colors.primary, fontWeight: 'bold' },
 });
 
 export default LoginScreen;

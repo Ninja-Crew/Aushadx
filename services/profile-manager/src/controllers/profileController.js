@@ -15,9 +15,9 @@ export async function getProfile(req, res) {
 export async function getMedicalInfo(req, res) {
   try {
     const userId = req.params.user_id || req.user.sub;
-    const medicalInfo = await profileService.getMedicalInfo(userId);
-    if (!medicalInfo) return error(res, "Profile not found", 404);
-    return success(res, { medical_info: medicalInfo });
+    const profile = await profileService.getMedicalInfo(userId);
+    if (!profile) return error(res, "Profile not found", 404);
+    return success(res, { profile });
   } catch (err) {
     return error(res, "Failed to get medical info", 500, err.message);
   }

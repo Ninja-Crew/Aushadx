@@ -35,3 +35,15 @@ export const getMedicalInfo = async (token) => {
     throw error.response ? error.response.data : error;
   }
 };
+
+export const deleteProfile = async (token) => {
+  try {
+    const response = await client.delete(`/profile`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Delete Profile error:", error);
+    throw error.response ? error.response.data : error;
+  }
+};

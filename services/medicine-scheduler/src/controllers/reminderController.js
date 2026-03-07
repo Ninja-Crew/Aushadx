@@ -68,6 +68,59 @@ export const createReminder = async (req, res) => {
   }
 };
 
+export const updateReminder = async (req, res) => {
+  const { reminderId } = req.params;
+  try {
+    const {  // ID of the reminder to update
+      medicineName, dosage, 
+      frequency, frequencyValue, specificWeekDays, specificDayOfMonth, specificTimes,
+      duration, durationValue, endDate: requestedEndDate,
+      time
+    } = req.body;
+
+    if (!reminderId) {
+      return res.status(400).json({ message: 'Reminder ID is required for update' });
+    }
+
+    let calcedEndDate = requestedEndDate;
+    if (duration && duration !== 'UNTIL_DATE' && duration !== 'CONTINUOUS') {
+      calcedEndDate = calculateEndDate(new Date(), duration, durationValue);
+    }
+
+    const updatedReminder = await Reminder.findOneAndUpdate(
+      { _id: reminderId },
+      {
+        medicineName,
+        dosage,
+        frequency,
+        frequencyValue,
+        specificWeekDays,
+        specificDayOfMonth,
+        specificTimes,
+        duration,
+        durationValue,
+        endDate: calcedEndDate,
+        time,
+        type: frequency === 'ONCE' ? 'once' : 'recurring'
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedReminder) {
+      return res.status(404).json({ message: 'Reminder not found or access denied' });
+    }
+    
+    // Reschedule the job
+    await cancelReminderJobs(updatedReminder._id);
+    await scheduleReminder(updatedReminder);
+
+    res.status(200).json(updatedReminder);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 export const getReminders = async (req, res) => {
   try {
     const { userId } = req.params;

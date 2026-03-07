@@ -1,55 +1,76 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, TextInput, Button, FlatList, StyleSheet, Platform } from 'react-native';
+import { View, TextInput, TouchableOpacity, Text, FlatList, StyleSheet, Platform, Keyboard, KeyboardAvoidingView } from 'react-native';
 import ChatMessage from '../components/ChatMessage';
+import { useTheme } from '../context/ThemeContext';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const AgentScreen = ({ route }) => {
-  const { token } = route.params || {}; // Assuming token is passed via navigation
+  const { token } = route.params || {};
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const ws = useRef(null);
 
+  // Keyboard height tracking — precise alternative to KeyboardAvoidingView on Android
   useEffect(() => {
-    // Determine WS URL
-    const host = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
-    const port = 3001; // Gateway port
-    // Gateway app.js expects token in header or query param. 
-    // Standard WebSocket() in browser/RN doesn't support headers easily on all platforms?
-    // React Native's WebSocket supports headers as 2nd arg (protocols) or options?
-    // Actually, RN standard WebSocket constructor: WebSocket(url, protocols)
-    // To pass headers, some libraries needed, or use query param.
-    // Gateway app.js logic:
-    // const url = new URL(req.url, `http://${req.headers.host}`);
-    // token = url.searchParams.get("token");
-    // So query param is supported.
+    if (Platform.OS === 'android') {
+      const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      });
+      const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+        setKeyboardHeight(0);
+      });
+      return () => {
+        showSub.remove();
+        hideSub.remove();
+      };
+    }
+  }, []);
+
+  useEffect(() => {
+    const BASE_HOST = process.env.EXPO_PUBLIC_BASE_HOST || '127.0.0.1';
+    const NETWORK_HOST = process.env.EXPO_PUBLIC_NETWORK_HOST || '192.168.0.107';
+    const PORT = process.env.EXPO_PUBLIC_PORT || '30000';
     
-    // Also userId is needed? app.js extracts it from token.
-    
-    const wsUrl = `ws://${host}:${port}/ws?token=${token}`;
-    
+    const host = Platform.OS === 'android' && (BASE_HOST.includes('localhost') || BASE_HOST === '127.0.0.1') ? NETWORK_HOST : BASE_HOST;
+    const wsUrl = `ws://${host}:${PORT}/ws?token=${token}`;
+
     console.log("Connecting to WS:", wsUrl);
     ws.current = new WebSocket(wsUrl);
 
     ws.current.onopen = () => {
       console.log('WebSocket Connected');
-      setMessages(prev => [...prev, { id: Date.now(), text: 'Connected to Agent', isUser: false }]);
+      setMessages(prev => [...prev, { id: Math.random().toString(), text: 'Connected to Agent', isUser: false }]);
     };
 
     ws.current.onmessage = (e) => {
-      console.log('Received:', e.data);
-      // Ensure e.data is string. If binary, need handling.
-      // Agent service likely sends JSON or text.
       const text = e.data;
-      setMessages(prev => [...prev, { id: Date.now(), text, isUser: false }]);
+      setMessages(prev => {
+        const newMessages = [...prev];
+        if (newMessages.length > 0 && !newMessages[newMessages.length - 1].isUser) {
+          const lastIndex = newMessages.length - 1;
+          newMessages[lastIndex] = {
+            ...newMessages[lastIndex],
+            text: newMessages[lastIndex].text + text
+          };
+        } else {
+          newMessages.push({ id: Math.random().toString(), text, isUser: false });
+        }
+        return newMessages;
+      });
     };
 
     ws.current.onerror = (e) => {
       console.log('WebSocket Error:', e.message);
-      setMessages(prev => [...prev, { id: Date.now(), text: 'Error connecting to agent', isUser: false }]);
+      setMessages(prev => [...prev, { id: Math.random().toString(), text: 'Error connecting to agent', isUser: false }]);
     };
 
     ws.current.onclose = (e) => {
       console.log('WebSocket Closed:', e.code, e.reason);
-      setMessages(prev => [...prev, { id: Date.now(), text: 'Disconnected', isUser: false }]);
+      setMessages(prev => [...prev, { id: Math.random().toString(), text: 'Disconnected', isUser: false }]);
     };
 
     return () => {
@@ -61,63 +82,98 @@ const AgentScreen = ({ route }) => {
 
   const sendMessage = () => {
     if (!input.trim()) return;
-    
+
     const msg = input.trim();
-    setMessages(prev => [...prev, { id: Date.now(), text: msg, isUser: true }]);
-    
+    setMessages(prev => [...prev, { id: Math.random().toString(), text: msg, isUser: true }]);
+
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ message: msg })); // Adjust payload format based on Agent service expectation
+      ws.current.send(JSON.stringify({ message: msg }));
     } else {
-        console.log("WS not open");
+      console.log("WS not open");
     }
     setInput('');
   };
 
+  // Android: we manually track keyboard height and push the whole layout up
+  // iOS: standard KeyboardAvoidingView with 'padding' is reliable
+  if (Platform.OS === 'android') {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background, paddingBottom: keyboardHeight===0?0:keyboardHeight+16 }]}>
+        <FlatList
+          data={messages}
+          keyExtractor={item => item.id.toString()}
+          renderItem={({ item }) => (
+            <ChatMessage message={item.text} isUser={item.isUser} />
+          )}
+          contentContainerStyle={styles.list}
+          style={{ flex: 1 }}
+        />
+        <View style={[
+          styles.inputContainer,
+          {
+            borderColor: colors.border,
+            backgroundColor: colors.card,
+            paddingBottom: keyboardHeight > 0 ? 8 : insets.bottom + 8
+          }
+        ]}>
+          <TextInput
+            style={[styles.input, { borderColor: colors.border, backgroundColor: colors.inputBg, color: colors.text }]}
+            value={input}
+            onChangeText={setInput}
+            placeholder="Type a message..."
+            placeholderTextColor={colors.textSecondary}
+          />
+          <TouchableOpacity onPress={sendMessage} style={[styles.sendBtn, { backgroundColor: colors.primary }]}>
+            <MaterialIcons name="send" size={22} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      behavior="padding"
+      keyboardVerticalOffset={90}
+    >
       <FlatList
         data={messages}
         keyExtractor={item => item.id.toString()}
-        renderItem={({ item }) => <ChatMessage message={item.text} isUser={item.isUser} />}
+        renderItem={({ item }) => (
+          <ChatMessage message={item.text} isUser={item.isUser} />
+        )}
         contentContainerStyle={styles.list}
+        style={{ flex: 1 }}
       />
-      <View style={styles.inputContainer}>
+      <View style={[
+        styles.inputContainer,
+        { borderColor: colors.border, backgroundColor: colors.card, paddingBottom: insets.bottom + 8 }
+      ]}>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { borderColor: colors.border, backgroundColor: colors.inputBg, color: colors.text }]}
           value={input}
           onChangeText={setInput}
           placeholder="Type a message..."
+          placeholderTextColor={colors.textSecondary}
         />
-        <Button title="Send" onPress={sendMessage} />
+        <TouchableOpacity onPress={sendMessage} style={[styles.sendBtn, { backgroundColor: colors.primary }]}>
+          <MaterialIcons name="send" size={22} color="#fff" />
+        </TouchableOpacity>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  list: {
-    padding: 10,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    padding: 10,
-    borderTopWidth: 1,
-    borderColor: '#ccc',
-    alignItems: 'center',
-  },
+  container: { flex: 1 },
+  list: { padding: 10 },
+  inputContainer: { flexDirection: 'row', padding: 10, borderTopWidth: 1, alignItems: 'center' },
   input: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 20,
-    paddingHorizontal: 15,
-    paddingVertical: 5,
-    marginRight: 10,
+    flex: 1, borderWidth: 1, borderRadius: 20,
+    paddingHorizontal: 15, paddingVertical: 8, marginRight: 10,
   },
+  sendBtn: { width: 42, height: 42, borderRadius: 21, justifyContent: 'center', alignItems: 'center' },
 });
 
 export default AgentScreen;

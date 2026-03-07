@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "mobile-client",
+    "name": "AushadX",
     "slug": "mobile-client",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -13,14 +13,24 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "config": {
+        "googleMapsApiKey": "AIzaSyD8HCvRVMc3G_9fdrN6u636rVRLE2rHdnE"
+      }
     },
     "android": {
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.anonymous.mobileclient",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyD8HCvRVMc3G_9fdrN6u636rVRLE2rHdnE"
+        }
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"

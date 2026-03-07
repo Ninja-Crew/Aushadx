@@ -24,7 +24,7 @@ function startMockProfileServer() {
                 status: true,
                 data: {
                     medical_info: {
-                        medical_history: "Patient has history of asthma."
+                        medical_info: "Patient has history of asthma."
                     }
                 }
             }));

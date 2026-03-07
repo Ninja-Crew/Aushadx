@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { createReminder, updateReminder, deleteReminder } from '../api/reminders';
-import { colors, spacing, typography } from '../styles/theme';
+import { spacing } from '../styles/theme';
+import { useTheme } from '../context/ThemeContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
@@ -38,7 +39,8 @@ const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const AddEditReminderScreen = ({ route, navigation }) => {
   const { token, reminderData } = route.params || {};
-  const isEditMode = !!reminderData;
+  const { colors } = useTheme();
+  const isEditMode = !!(reminderData && reminderData._id);
 
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -57,7 +59,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
   });
 
   useEffect(() => {
-    if (isEditMode && reminderData) {
+    if (reminderData) {
       setFormData({
         medicineName: reminderData.medicineName || '',
         dosage: reminderData.dosage || '',
@@ -204,6 +206,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
     );
   };
 
+  const styles = makeStyles(colors);
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <KeyboardAvoidingView 
@@ -392,33 +395,32 @@ const AddEditReminderScreen = ({ route, navigation }) => {
   );
 };
 
-// ... styling missing here on purpose, will add below inline or separate file ...
-const styles = StyleSheet.create({
+const makeStyles = (colors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.l, paddingBottom: spacing.xxl },
-  headerTitle: { ...typography.header, color: colors.primary, marginBottom: spacing.l },
-  sectionTitle: { ...typography.subheader, marginTop: spacing.m, marginBottom: spacing.m, color: colors.text },
+  content: { padding: spacing.l, paddingBottom: 80 },
+  headerTitle: { fontSize: 24, fontWeight: 'bold', color: colors.primary, marginBottom: spacing.l },
+  sectionTitle: { fontSize: 18, fontWeight: '600', marginTop: spacing.m, marginBottom: spacing.m, color: colors.text },
   divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.l },
   inputGroup: { marginBottom: spacing.m },
-  label: { ...typography.caption, marginBottom: spacing.xs, color: colors.textSecondary },
-  input: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: spacing.m, ...typography.body },
+  label: { fontSize: 13, marginBottom: 6, color: colors.textSecondary },
+  input: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: spacing.m, fontSize: 16, color: colors.text },
   pickerContainer: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, overflow: 'hidden', backgroundColor: colors.card },
-  picker: { height: 50, width: '100%' },
-  weekDaysContainer: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.xs },
+  picker: { height: 50, width: '100%', color: colors.text },
+  weekDaysContainer: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 },
   dayButton: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.border, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.card },
   dayButtonSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
   dayButtonText: { fontSize: 13, color: colors.text },
   dayButtonTextSelected: { color: '#FFF', fontWeight: 'bold' },
   timeRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.s },
-  iconButton: { padding: spacing.xs, marginLeft: spacing.s },
-  addTimeBtn: { flexDirection: 'row', alignItems: 'center', padding: spacing.xs },
+  iconButton: { padding: 4, marginLeft: spacing.s },
+  addTimeBtn: { flexDirection: 'row', alignItems: 'center', padding: 4 },
   addTimeText: { color: colors.primary, marginLeft: 4, fontWeight: 'bold' },
-  actions: { marginTop: spacing.xl, gap: spacing.m },
+  actions: { marginTop: spacing.l, gap: spacing.m },
   actionBtn: { padding: spacing.m, borderRadius: 12, alignItems: 'center' },
   saveBtn: { backgroundColor: colors.primary },
-  saveBtnText: { color: '#FFF', ...typography.button },
-  deleteBtn: { backgroundColor: '#FFF', borderWidth: 1, borderColor: colors.error },
-  deleteBtnText: { color: colors.error, ...typography.button },
+  saveBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+  deleteBtn: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.error },
+  deleteBtnText: { color: colors.error, fontSize: 16, fontWeight: '700' },
 });
 
 export default AddEditReminderScreen;

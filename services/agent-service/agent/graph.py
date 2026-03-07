@@ -17,7 +17,7 @@ class AgentState(TypedDict):
 # Initialize LLM
 llm = ChatGoogleGenerativeAI(
     model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-    google_api_key=os.getenv("GOOGLE_API_KEY"),
+    google_api_key=os.getenv("GEMINI_API_KEY"),
     temperature=0
 )
 
