@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -18,6 +18,10 @@ import NotificationsScreen from '../screens/NotificationsScreen';
 import { useTheme } from '../context/ThemeContext';
 import { navigationRef } from './navigationRef';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getRefreshToken, saveToken } from '../utils/storage';
+import { refreshTokenCall } from '../api/auth';
+import { getProfile } from '../api/profile';
+import BootSplash from '../components/BootSplash';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -68,6 +72,49 @@ const MainTabNavigator = ({ route }) => {
 
 const AppNavigator = () => {
   const { colors } = useTheme();
+  const [isBootstrapping, setIsBootstrapping] = React.useState(true);
+  const initialRoute = useRef('Login');
+  const initialParams = useRef(undefined);
+
+  useEffect(() => {
+    const bootstrap = async () => {
+      try {
+        const storedRefresh = await getRefreshToken();
+        if (storedRefresh) {
+          try {
+            // Attempt to exchange refresh token for a new access token
+            const data = await refreshTokenCall(storedRefresh);
+            const newAccess = data?.tokens?.access;
+            const newRefresh = data?.tokens?.refresh;
+            if (newAccess) {
+              await saveToken(newAccess, newRefresh || storedRefresh);
+              // Fetch the user profile immediately so screens have the name
+              let user = data?.user;
+              try {
+                user = await getProfile(newAccess);
+                console.log('[AppNavigator] Profile fetched on boot, name:', user?.name);
+              } catch (profileErr) {
+                console.warn('[AppNavigator] Profile fetch failed after refresh, using token data:', profileErr?.message);
+              }
+              initialRoute.current = 'MainTabs';
+              initialParams.current = { token: newAccess, user };
+              console.log('[AppNavigator] Boot complete — navigating to MainTabs');
+            }
+          } catch (refreshErr) {
+            console.log('[AppNavigator] Boot refresh failed, going to Login:', refreshErr?.message);
+            // Stay on Login
+          }
+        }
+      } finally {
+        setIsBootstrapping(false);
+      }
+    };
+    bootstrap();
+  }, []);
+
+  if (isBootstrapping) {
+    return <BootSplash />
+  }
 
   const headerStyle = {
     headerStyle: { backgroundColor: colors.card },
@@ -77,9 +124,14 @@ const AppNavigator = () => {
 
   return (
     <NavigationContainer ref={navigationRef}>
-      <Stack.Navigator initialRouteName="Login" screenOptions={headerStyle}>
+      <Stack.Navigator
+        initialRouteName={initialRoute.current}
+        screenOptions={headerStyle}
+      >
         <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="MainTabs" component={MainTabNavigator} options={{ headerShown: false }} />
+        {/* initialParams are passed when navigating from bootstrap */}
+        <Stack.Screen name="MainTabs" component={MainTabNavigator} options={{ headerShown: false }} initialParams={initialParams.current} />
+
         <Stack.Screen name="Dashboard" component={DashboardScreen} options={{ headerShown: false }} />
         <Stack.Screen name="Reminders" component={RemindersScreen} />
         <Stack.Screen name="Analyzer" component={AnalyzerScreen} />

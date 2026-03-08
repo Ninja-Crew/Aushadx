@@ -2,8 +2,12 @@ import 'react-native-gesture-handler'; // MUST BE AT THE TOP
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as SplashScreen from 'expo-splash-screen';
 import AppNavigator from './src/navigation/AppNavigator';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
+
+// Keep the native splash screen visible while we fetch tokens/profile
+SplashScreen.preventAutoHideAsync().catch(() => {});
 import {
   getMessaging,
   requestPermission,

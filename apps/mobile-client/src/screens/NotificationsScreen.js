@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -8,12 +8,21 @@ import { takeReminder, snoozeReminder } from '../api/reminders';
 import notifee from '@notifee/react-native';
 import { useNotificationContext } from '../context/NotificationContext';
 
+const getMinutesAgo = (scheduledTime, fallback) => {
+  if (!scheduledTime) return fallback ?? '?';
+  const diffMs = Date.now() - new Date(scheduledTime).getTime();
+  const mins = Math.max(0, Math.floor(diffMs / 60000));
+  return mins;
+};
+
 const NotificationsScreen = ({ route, navigation }) => {
   const { token, userId } = route.params || {};
   const { colors, isDark } = useTheme();
   const { clearUnread, notifications, removeNotification } = useNotificationContext();
   
   const [processingId, setProcessingId] = useState(null);
+  // Capture "now" once when the screen opens so all cards are consistent
+  const [openedAt] = useState(() => Date.now());
 
   useEffect(() => {
     clearUnread();
@@ -51,7 +60,7 @@ const NotificationsScreen = ({ route, navigation }) => {
                  </View>
               </View>
               <Text style={[styles.timeText, { color: colors.textSecondary }]}>
-                 Missed {item.timeSinceMissedMinutes} minutes ago
+                 Missed {getMinutesAgo(item.scheduledTime, item.timeSinceMissedMinutes)} minutes ago
               </Text>
               <Text style={[styles.scheduleText, { color: colors.textSecondary }]}>
                  Scheduled for: {new Date(item.scheduledTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -161,3 +170,4 @@ const styles = StyleSheet.create({
 });
 
 export default NotificationsScreen;
+
