@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -78,7 +78,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
     specificWeekDays: [], // Array of numbers 0-6
     specificDayOfMonth: '',
     specificTimes: [getCurrentTimeStr()], // Default one time
-    onceDate: getCurrentDateStr(), // For ONCE — today's date YYYY-MM-DD
+    onceDate: getCurrentDateStr(), // For ONCE â€” today's date YYYY-MM-DD
     duration: 'SINGLE_DAY', // Matches ONCE default frequency
     durationValue: '',
     endDate: '', // For UNTIL_DATE, format YYYY-MM-DD
@@ -94,7 +94,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
         frequencyValue: reminderData.frequencyValue ? String(reminderData.frequencyValue) : '',
         specificWeekDays: reminderData.specificWeekDays || [],
         specificDayOfMonth: reminderData.specificDayOfMonth ? String(reminderData.specificDayOfMonth) : '',
-        // Edit mode: keep original times as-is — never replace with current clock
+        // Edit mode: keep original times as-is â€” never replace with current clock
         specificTimes: reminderData.specificTimes?.length > 0
           ? reminderData.specificTimes
           : reminderData.time
@@ -343,6 +343,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
               value={formData.medicineName}
               onChangeText={(text) => setFormData({...formData, medicineName: text})}
               placeholder="e.g. Paracetamol"
+              placeholderTextColor={colors.textSecondary}
             />
           </View>
 
@@ -353,6 +354,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
               value={formData.dosage}
               onChangeText={(text) => setFormData({...formData, dosage: text})}
               placeholder="e.g. 1 Tablet (500mg)"
+              placeholderTextColor={colors.textSecondary}
             />
           </View>
 
@@ -372,6 +374,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
                   duration: itemValue === 'ONCE' ? 'SINGLE_DAY' : (prev.duration === 'SINGLE_DAY' ? 'CONTINUOUS' : prev.duration),
                 }))}
                 style={styles.picker}
+                dropdownIconColor={colors.text}
               >
                 {FREQUENCY_TYPES.map(f => <Picker.Item key={f.value} label={f.label} value={f.value} />)}
               </Picker>
@@ -386,6 +389,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
                 value={formData.frequencyValue}
                 onChangeText={(text) => setFormData({...formData, frequencyValue: text})}
                 placeholder="e.g. 2"
+                placeholderTextColor={colors.textSecondary}
                 keyboardType="numeric"
               />
             </View>
@@ -422,6 +426,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
                 value={formData.specificDayOfMonth}
                 onChangeText={(text) => setFormData({...formData, specificDayOfMonth: text})}
                 placeholder="e.g. 15"
+                placeholderTextColor={colors.textSecondary}
                 keyboardType="numeric"
                 maxLength={2}
               />
@@ -436,6 +441,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
                 value={formData.specificTimes[0]}
                 onChangeText={(text) => updateTime(0, text)}
                 placeholder="08:00"
+                placeholderTextColor={colors.textSecondary}
                 maxLength={5}
               />
               {currentErrors.time_0 ? (
@@ -486,6 +492,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
                       value={time}
                       onChangeText={(text) => updateTime(index, text)}
                       placeholder="08:00"
+                      placeholderTextColor={colors.textSecondary}
                       maxLength={5}
                     />
                   </View>
@@ -505,6 +512,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
                 value={formData.specificTimes[0]}
                 onChangeText={(text) => updateTime(0, text)}
                 placeholder="08:00"
+                placeholderTextColor={colors.textSecondary}
                 maxLength={5}
               />
               {currentErrors.time_0 ? (
@@ -525,6 +533,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
                 onValueChange={(itemValue) => setFormData({ ...formData, duration: itemValue })}
                 enabled={formData.frequency !== 'ONCE'}
                 style={styles.picker}
+                dropdownIconColor={colors.text}
               >
                 {formData.frequency === 'ONCE'
                   ? <Picker.Item label="Single Day (One-time)" value="SINGLE_DAY" />
@@ -549,6 +558,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
                 value={formData.durationValue}
                 onChangeText={(text) => setFormData({...formData, durationValue: text})}
                 placeholder="e.g. 7"
+                placeholderTextColor={colors.textSecondary}
                 keyboardType="numeric"
               />
             </View>
@@ -643,3 +653,4 @@ const makeStyles = (colors) => StyleSheet.create({
 });
 
 export default AddEditReminderScreen;
+
