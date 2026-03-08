@@ -1,5 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, Alert, ScrollView, Image, TouchableOpacity, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  StyleSheet,
+  Alert,
+  ScrollView,
+  Image,
+  TouchableOpacity,
+  ActivityIndicator,
+} from 'react-native';
 import { analyzeMedicine } from '../api/analyzer';
 import * as ImagePicker from 'expo-image-picker';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
@@ -8,7 +18,7 @@ import { useTheme } from '../context/ThemeContext';
 import AnalysisResultModal from '../components/AnalysisResultModal';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
-const AnalyzerScreen = ({ route }) => {
+const AnalyzerScreen = ({ route, navigation }) => {
   const { token } = route.params || {};
   const { colors } = useTheme();
   const [text, setText] = useState('');
@@ -16,6 +26,7 @@ const AnalyzerScreen = ({ route }) => {
   const [loading, setLoading] = useState(false);
   const [imageUri, setImageUri] = useState(null);
   const [showResult, setShowResult] = useState(false);
+  const [unclearImage, setUnclearImage] = useState(false);
 
   // Load persisted last result on mount
   useEffect(() => {
@@ -42,6 +53,8 @@ const AnalyzerScreen = ({ route }) => {
       if (!res.canceled && res.assets?.length > 0) {
         const uri = res.assets[0].uri;
         setImageUri(uri);
+        setUnclearImage(false);
+        setText('');
         performOCR(uri);
       }
     } catch {
@@ -69,21 +82,61 @@ const AnalyzerScreen = ({ route }) => {
   const handleAnalyze = async () => {
     if (!text.trim()) return;
     setLoading(true);
+    setUnclearImage(false);
     try {
       const data = await analyzeMedicine(token, { text });
       setResult(data);
       setShowResult(true);
-      // Persist last result so it survives navigation
       AsyncStorage.setItem('@lastAnalysisResult', JSON.stringify(data)).catch(() => {});
     } catch (error) {
-      Alert.alert('Error', error.message || 'Analysis failed');
+      const isUnclearLabel =
+        error?.error === 'NOT_MEDICINE_LABEL' ||
+        error?.status === 422 ||
+        (typeof error?.message === 'string' && error.message.toLowerCase().includes('medicine label'));
+
+      console.log('[Analyzer] caught error:', JSON.stringify(error), 'isUnclear:', isUnclearLabel);
+
+      if (isUnclearLabel) {
+        setUnclearImage(true);
+      } else {
+        Alert.alert('Error', error.message || 'Analysis failed');
+      }
     } finally {
       setLoading(false);
     }
   };
 
+  const handleTryAgain = () => {
+    setUnclearImage(false);
+    setImageUri(null);
+    setText('');
+    navigation.navigate('MainTabs', { token });
+  };
+
   const s = makeStyles(colors);
 
+  // ── Unclear image state: fullscreen blurred overlay ───────────────────────
+  if (unclearImage && imageUri) {
+    return (
+      <View style={s.unclearContainer}>
+        <Image source={{ uri: imageUri }} style={s.unclearBg} blurRadius={12} />
+        <View style={s.unclearDimmer} />
+        <View style={s.unclearContent}>
+          <MaterialIcons name="warning-amber" size={56} color="#FFD600" />
+          <Text style={s.unclearTitle}>Unclear medicine image</Text>
+          <Text style={s.unclearSubtitle}>
+            We couldn't identify this as a medicine label.{'\n'}Please try again with a clearer photo.
+          </Text>
+          <TouchableOpacity style={s.tryAgainBtn} onPress={handleTryAgain}>
+            <MaterialIcons name="refresh" size={20} color="#fff" />
+            <Text style={s.tryAgainText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // ── Normal state ──────────────────────────────────────────────────────────
   return (
     <ScrollView contentContainerStyle={s.container} style={{ backgroundColor: colors.background }}>
       <Text style={s.label}>Scan your medicine label:</Text>
@@ -134,6 +187,56 @@ const AnalyzerScreen = ({ route }) => {
 };
 
 const makeStyles = (colors) => StyleSheet.create({
+  // ── unclear image (fullscreen) ────────────────────────────────────────────
+  unclearContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  unclearBg: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  unclearDimmer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.60)',
+  },
+  unclearContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+    gap: 14,
+  },
+  unclearTitle: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  unclearSubtitle: {
+    color: 'rgba(255,255,255,0.80)',
+    fontSize: 15,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  tryAgainBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 14,
+    marginTop: 10,
+  },
+  tryAgainText: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  // ── normal state ─────────────────────────────────────────────────────────
   container: { padding: 20 },
   label: { fontSize: 15, fontWeight: '600', color: colors.text, marginBottom: 10 },
   input: {

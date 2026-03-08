@@ -47,6 +47,9 @@ const AddEditReminderScreen = ({ route, navigation }) => {
 
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Track whether user has touched the date/time fields (so we don't
+  // flag the original time as "in the past" before any edits)
+  const [dateTimeModified, setDateTimeModified] = useState(false);
 
   // Date picker state
   const [showOnceDatePicker, setShowOnceDatePicker] = useState(false);
@@ -83,6 +86,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
 
   useEffect(() => {
     if (reminderData) {
+      setDateTimeModified(false); // reset on load so original values aren't flagged
       setFormData({
         medicineName: reminderData.medicineName || '',
         dosage: reminderData.dosage || '',
@@ -90,8 +94,18 @@ const AddEditReminderScreen = ({ route, navigation }) => {
         frequencyValue: reminderData.frequencyValue ? String(reminderData.frequencyValue) : '',
         specificWeekDays: reminderData.specificWeekDays || [],
         specificDayOfMonth: reminderData.specificDayOfMonth ? String(reminderData.specificDayOfMonth) : '',
-        specificTimes: reminderData.specificTimes && reminderData.specificTimes.length > 0 ? reminderData.specificTimes : [getCurrentTimeStr()],
-        onceDate: reminderData.startDate ? new Date(reminderData.startDate).toISOString().split('T')[0] : getCurrentDateStr(),
+        // Edit mode: keep original times as-is — never replace with current clock
+        specificTimes: reminderData.specificTimes?.length > 0
+          ? reminderData.specificTimes
+          : reminderData.time
+            ? [new Date(reminderData.time).toTimeString().slice(0, 5)]  // extract HH:MM from ISO
+            : [getCurrentTimeStr()],  // new reminder default only
+        // Edit mode: use original startDate; fall back to original `time` field; never replace with today
+        onceDate: reminderData.startDate
+          ? new Date(reminderData.startDate).toISOString().split('T')[0]
+          : (reminderData.time
+              ? new Date(reminderData.time).toISOString().split('T')[0]
+              : ''),
         duration: reminderData.duration || 'CONTINUOUS',
         durationValue: reminderData.durationValue ? String(reminderData.durationValue) : '',
         endDate: reminderData.endDate ? new Date(reminderData.endDate).toISOString().split('T')[0] : '',
@@ -133,6 +147,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
   };
 
   const updateTime = (index, value) => {
+    setDateTimeModified(true);
     const times = [...formData.specificTimes];
     times[index] = value;
     setFormData({ ...formData, specificTimes: times });
@@ -168,19 +183,22 @@ const AddEditReminderScreen = ({ route, navigation }) => {
     }
 
     if (formData.frequency === 'ONCE') {
-      if (!formData.onceDate) {
+      if (!formData.onceDate && !isEditMode) {
         errors.dateTime = 'Date is required';
-      } else if (!errors.time_0) {
-        const now = new Date();
-        now.setSeconds(0, 0);
-
-        const [year, month, day] = formData.onceDate.split('-');
-        const selectedDate = new Date(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10));
-        const [hour, minute] = formData.specificTimes[0].split(':');
-        selectedDate.setHours(parseInt(hour, 10), parseInt(minute, 10), 0, 0);
-
-        if (selectedDate < now) {
-          errors.dateTime = 'Date and time cannot be in the past';
+      } else if (formData.onceDate && !errors.time_0) {
+        // Only check past-date if:
+        // - creating a new reminder, OR
+        // - user has explicitly modified the date or time in edit mode
+        if (!isEditMode || dateTimeModified) {
+          const now = new Date();
+          now.setSeconds(0, 0);
+          const [year, month, day] = formData.onceDate.split('-');
+          const selectedDate = new Date(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10));
+          const [hour, minute] = (formData.specificTimes[0] || '00:00').split(':');
+          selectedDate.setHours(parseInt(hour, 10), parseInt(minute, 10), 0, 0);
+          if (selectedDate < now) {
+            errors.dateTime = 'Date and time cannot be in the past';
+          }
         }
       }
     }
@@ -444,6 +462,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
                   onChange={(event, selectedDate) => {
                     setShowOnceDatePicker(Platform.OS === 'ios');
                     if (selectedDate) {
+                      setDateTimeModified(true);
                       const year = selectedDate.getFullYear();
                       const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
                       const day = String(selectedDate.getDate()).padStart(2, '0');

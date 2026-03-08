@@ -72,6 +72,13 @@ export async function analyze(req, res) {
       medicineSchema,
     );
 
+    if (!analysis.is_medicine_label) {
+      return res.status(422).json({
+        error: "NOT_MEDICINE_LABEL",
+        message: "The image does not appear to contain a medicine label. Please try again with a clearer photo.",
+      });
+    }
+
     return res.json({
       success: true,
       analysis,

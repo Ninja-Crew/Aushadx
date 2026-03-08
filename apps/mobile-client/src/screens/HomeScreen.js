@@ -24,6 +24,7 @@ const HomeScreen = ({ navigation, route }) => {
   const [result, setResult] = useState(null);
   const [showResult, setShowResult] = useState(false);
   const [greeting, setGreeting] = useState('');
+  const [unclearImage, setUnclearImage] = useState(false);
 
   // Determine greeting based on time of day
   useEffect(() => {
@@ -57,6 +58,7 @@ const HomeScreen = ({ navigation, route }) => {
       if (!res.canceled && res.assets?.length > 0) {
         const uri = res.assets[0].uri;
         setImageUri(uri);
+        setUnclearImage(false); // reset on new image
         performOCR(uri);
       }
     } catch {
@@ -85,6 +87,7 @@ const HomeScreen = ({ navigation, route }) => {
   const handleAnalyze = async () => {
     if (!text.trim()) return;
     setAnalyzing(true);
+    setUnclearImage(false);
     try {
       const data = await analyzeMedicine(token, { text });
       setResult(data);
@@ -93,7 +96,15 @@ const HomeScreen = ({ navigation, route }) => {
       setImageUri(null); // clear image
       AsyncStorage.setItem('@lastAnalysisResult', JSON.stringify(data)).catch(() => {});
     } catch (error) {
-      Alert.alert('Error', error.message || 'Analysis failed');
+      const isUnclearLabel =
+        error?.error === 'NOT_MEDICINE_LABEL' ||
+        error?.status === 422 ||
+        (typeof error?.message === 'string' && error.message.toLowerCase().includes('medicine label'));
+      if (isUnclearLabel) {
+        setUnclearImage(true);
+      } else {
+        Alert.alert('Error', error.message || 'Analysis failed');
+      }
     } finally {
       setAnalyzing(false);
     }
@@ -113,6 +124,31 @@ const HomeScreen = ({ navigation, route }) => {
 
   const s = makeStyles(colors);
   const userName = user?.name ? user.name.split(' ')[0] : 'User';
+
+  // ── Unclear image fullscreen overlay ──────────────────────────────────────
+  if (unclearImage && imageUri) {
+    return (
+      <View style={s.unclearContainer}>
+        <Image source={{ uri: imageUri }} style={s.unclearBg} blurRadius={12} />
+        <View style={s.unclearDimmer} />
+        <View style={s.unclearContent}>
+          <MaterialIcons name="warning-amber" size={56} color="#FFD600" />
+          <Text style={s.unclearTitle}>Unclear medicine image</Text>
+          <Text style={s.unclearSubtitle}>
+            We couldn't identify this as a medicine label.{"\n"}Please try again with a clearer photo.
+          </Text>
+          <TouchableOpacity
+            style={s.tryAgainBtn}
+            onPress={() => { setUnclearImage(false); setImageUri(null); setText(''); }}
+          >
+            <MaterialIcons name="refresh" size={20} color="#fff" />
+            <Text style={s.tryAgainText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+  // ──────────────────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView style={s.container} edges={['left', 'right']}>
@@ -250,6 +286,21 @@ const HomeScreen = ({ navigation, route }) => {
 const makeStyles = (colors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   bodyContainer: { paddingHorizontal: 20, paddingTop: 10 },
+
+  // ── Unclear image (fullscreen) ────────────────────────────────────────────
+  unclearContainer: { flex: 1, backgroundColor: '#000' },
+  unclearBg: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%', resizeMode: 'cover' },
+  unclearDimmer: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.58)' },
+  unclearContent: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 14 },
+  unclearTitle: { color: '#fff', fontSize: 22, fontWeight: '800', textAlign: 'center' },
+  unclearSubtitle: { color: 'rgba(255,255,255,0.80)', fontSize: 15, textAlign: 'center', lineHeight: 22 },
+  tryAgainBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: colors.primary, paddingHorizontal: 32, paddingVertical: 14,
+    borderRadius: 14, marginTop: 10,
+  },
+  tryAgainText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+  // ─────────────────────────────────────────────────────────────────────────
   
   // Hero Section
   headerSection: {
