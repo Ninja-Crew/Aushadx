@@ -51,7 +51,10 @@
     ],
     "extra": {
       "googleMapsApiKey": "AIzaSyD8HCvRVMc3G_9fdrN6u636rVRLE2rHdnE",
-      "baseUrl": "http://10.103.47.147:30000"
+      "baseUrl": "https://sumptuous-mauro-scribbly.ngrok-free.dev",
+      "apiHeaders": {
+        "ngrok-skip-browser-warning": "true"
+      }
     }
   }
 }

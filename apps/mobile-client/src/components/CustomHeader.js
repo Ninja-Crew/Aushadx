@@ -34,6 +34,11 @@ const CustomHeader = ({ title, navigation, token }) => {
         </View>
 
         <View style={[styles.headerSide, { alignItems: 'flex-end', flexDirection: 'row', justifyContent: 'flex-end', gap: 16 }]}>
+          {title === 'AI Chat' && (
+             <TouchableOpacity style={styles.headerIcon} onPress={() => navigation.navigate('AIChatTab', { openHistory: true })}>
+                 <MaterialIcons name="history" size={24} color={colors.text} />
+             </TouchableOpacity>
+          )}
           <TouchableOpacity style={[styles.headerIcon, { position: 'relative' }]} onPress={() => navigation.navigate('Notifications', { token })}>
             <MaterialIcons name="notifications" size={24} color={colors.text} />
             {unreadCount > 0 && (

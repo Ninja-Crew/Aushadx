@@ -4,8 +4,12 @@ python-dotenv
 PyJWT
 langchain
 langgraph
+langgraph-checkpoint-mongodb
+motor
+pymongo
 langchain-google-genai
 google-generativeai
+langchain-google-vertexai
 pydantic
 pytest
 pytest-asyncio

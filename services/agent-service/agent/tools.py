@@ -1,11 +1,12 @@
 import os
 import requests
-import json
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from utils.logger import logger
 from dotenv import load_dotenv
+from langchain_core.runnables import RunnableConfig
+from datetime import datetime
 
 load_dotenv()
 
@@ -13,136 +14,223 @@ MEDICINE_ANALYZER_URL = os.getenv("MEDICINE_ANALYZER_URL", "http://localhost:300
 MEDICINE_SCHEDULER_URL = os.getenv("MEDICINE_SCHEDULER_URL", "http://localhost:3001")
 PROFILE_MANAGER_URL = os.getenv("PROFILE_MANAGER_URL", "http://localhost:3003")
 
-class MedicineAnalysisInput(BaseModel):
-    text: str = Field(description="The text content or OCR result to be analyzed for medicine details.")
-    user_id: str = Field(description="The unique identifier of the user.")
+class GetUpcomingRemindersInput(BaseModel):
+    pass # No inputs needed from LLM
 
-@tool("analyze_medicine", args_schema=MedicineAnalysisInput)
-def analyze_medicine(text: str, user_id: str) -> Dict[str, Any]:
-    """
-    Analyzes raw text or OCR data to extract structured medicine information.
-    
-    Use this tool when you have raw text describing a medicine (e.g., from a label) and need to understand:
-    - Drug name
-    - Dosage information
-    - Side effects
-    - Warnings/Contraindications
-    
-    Returns a JSON object with the extracted details.
-    """
+@tool("get_upcoming_reminders", args_schema=GetUpcomingRemindersInput)
+def get_upcoming_reminders(config: RunnableConfig) -> Dict[str, Any]:
+    """Fetches specific scheduled reminders for the user."""
+    user_id = config.get("configurable", {}).get("thread_id")
     try:
-        url = f"{MEDICINE_ANALYZER_URL}/analyze"
-        payload = {"medicine_data": {"text": text}, "userId": user_id}
+        url = f"{MEDICINE_SCHEDULER_URL}/reminders/{user_id}"
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        logger.error(f"Error calling get_upcoming_reminders: {e}")
+        return {"error": str(e)}
+
+class GetPendingMissedRemindersInput(BaseModel):
+    pass
+
+@tool("get_pending_or_missed_reminders", args_schema=GetPendingMissedRemindersInput)
+def get_pending_or_missed_reminders(config: RunnableConfig) -> List[Dict[str, Any]]:
+    """Queries the database for any doses the user missed or still needs to take today."""
+    user_id = config.get("configurable", {}).get("thread_id")
+    try:
+        url = f"{MEDICINE_SCHEDULER_URL}/reminders/missed/{user_id}"
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        logger.error(f"Error calling get_pending_or_missed_reminders: {e}")
+        return [{"error": str(e)}]
+
+class AnalyzeMedicineInput(BaseModel):
+    medicine_name: str = Field(description="The name of the medicine to analyze.")
+
+@tool("analyze_medicine", args_schema=AnalyzeMedicineInput)
+def analyze_medicine(medicine_name: str, config: RunnableConfig) -> Dict[str, Any]:
+    """Takes the medicine name, fetches the profile, and formats potential complications."""
+    user_id = config.get("configurable", {}).get("thread_id")
+    try:
+        url = f"{MEDICINE_ANALYZER_URL}/api/analyze/{user_id}"
+        payload = {"medicine_data": {"text": medicine_name}}
         response = requests.post(url, json=payload)
         response.raise_for_status()
         return response.json()
     except requests.RequestException as e:
         logger.error(f"Error calling analyze_medicine: {e}")
-        return {"error": str(e), "message": "Failed to analyze medicine text."}
+        return {"error": str(e)}
 
-class GetMedicineDetailsInput(BaseModel):
-    medicine_name: str = Field(description="The name of the medicine to retrieve details for.")
-    user_id: str = Field(description="The unique identifier of the user.")
+class CheckMedicineTakenInput(BaseModel):
+    medicine_name: str = Field(description="The name of the medicine to check.")
 
-@tool("get_medicine_details", args_schema=GetMedicineDetailsInput)
-def get_medicine_details(medicine_name: str, user_id: str) -> Dict[str, Any]:
-    """
-    Retrieves detailed information about a specific medicine by name.
+@tool("check_medicine_taken", args_schema=CheckMedicineTakenInput)
+def check_medicine_taken(medicine_name: str, config: RunnableConfig) -> Dict[str, Any]:
+    """Verifies the logs by getting pending/missed reminders and checking if the medicine is present."""
+    missed_reminders = get_pending_or_missed_reminders.invoke({}, config=config)
+    if isinstance(missed_reminders, list) and len(missed_reminders) > 0 and "error" in missed_reminders[0]:
+        return {"error": missed_reminders[0]["error"]}
+
+    # Filter for the specific medicine name
+    for reminder in missed_reminders:
+        if reminder.get("medicineName", "").lower() == medicine_name.lower():
+            return {
+                "medicine": medicine_name,
+                "status": "pending_or_missed",
+                "details": reminder
+            }
     
-    Use this tool when the user asks about a specific drug (e.g., 'Tell me about Paracetamol') 
-    without providing raw text/OCR data.
-    """
-    # Note: Assuming medicine-analyzer has a search or detail endpoint. 
-    # If not, we might reuse `analyze` with synthesized text or query a different endpoint.
-    # For now, let's assume we send it to analyze to get general knowledge or RAG info.
-    return analyze_medicine.invoke({"text": f"Information about {medicine_name}", "user_id": user_id})
+    return {
+        "medicine": medicine_name,
+        "status": "taken_or_not_scheduled",
+        "message": f"Could not find any pending or missed doses for {medicine_name}."
+    }
 
-class ScheduleMedicineInput(BaseModel):
-    user_id: str = Field(description="The unique identifier of the user.")
-    medicine_name: str = Field(description="Name of the medicine to schedule.")
-    dosage: str = Field(description="Dosage instructions (e.g., '500mg', '1 tablet').")
-    frequency: str = Field(description="How often to take the medicine (e.g., 'daily', 'weekly', 'twice a day').")
-    time: str = Field(description="The time to take the medicine (e.g., '09:00 AM').")
-    start_date: Optional[str] = Field(description="Start date in YYYY-MM-DD format.", default=None)
-    end_date: Optional[str] = Field(description="End date in YYYY-MM-DD format.", default=None)
+class CheckScheduleComplicationsInput(BaseModel):
+    pass
 
-@tool("schedule_medicine", args_schema=ScheduleMedicineInput)
-def schedule_medicine(user_id: str, medicine_name: str, dosage: str, frequency: str, time: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
-    """
-    Schedules a medicine reminder for a user.
-    
-    Use this tool when the user explicitly asks to set a reminder or schedule a medicine.
-    Requires specific details: name, dosage, frequency, and time.
-    """
+@tool("check_schedule_complications", args_schema=CheckScheduleComplicationsInput)
+def check_schedule_complications(config: RunnableConfig) -> Dict[str, Any]:
+    """A holistic check of all active reminders for the day to ensure taking them won't cause adverse interactions."""
+    user_id = config.get("configurable", {}).get("thread_id")
     try:
-        url = f"{MEDICINE_SCHEDULER_URL}/reminders"
+        url = f"{MEDICINE_SCHEDULER_URL}/reminders/{user_id}"
+        response = requests.get(url)
+        response.raise_for_status()
+        reminders = response.json()
+        
+        return {
+            "active_reminders": reminders,
+            "instruction": "Cross-reference these medications to ensure taking them at their scheduled times won't cause adverse drug interactions."
+        }
+    except requests.RequestException as e:
+        logger.error(f"Error calling check_schedule_complications: {e}")
+        return {"error": str(e)}
+
+class ScheduleReminderInput(BaseModel):
+    medicine_name: str = Field(description="Name of the medicine to schedule.")
+    dosage: str = Field(description="Dosage instructions (e.g., '1 tablet', '500mg').")
+    
+    # Strictly enforce valid enums to avoid mongoose validation errors
+    frequency: Literal[
+        'ONCE', 
+        'DAILY', 
+        'X_TIMES_DAILY', 
+        'EVERY_X_HOURS', 
+        'EVERY_X_MINUTES', 
+        'SPECIFIC_WEEK_DAYS', 
+        'SPECIFIC_DAY_OF_MONTH',
+        'AT_SPECIFIC_TIMINGS'
+    ] = Field(description="Strict frequency type. MUST BE EXACTLY ONE OF the enum values. Example: if every 6 hours, use 'EVERY_X_HOURS'.", default="ONCE")
+    
+    frequencyValue: Optional[int] = Field(description="The numeric value 'X' for EVERY_X frequencies.", default=None)
+    specificTimes: Optional[List[str]] = Field(description="A list of times to take the dose (e.g., ['08:00', '20:00']). Use for DAILY or ONCE.", default=None)
+    
+    duration: Literal[
+        'SINGLE_DAY',
+        'FOR_X_DAYS',
+        'FOR_X_WEEKS',
+        'FOR_X_MONTHS',
+        'UNTIL_DATE',
+        'CONTINUOUS'
+    ] = Field(description="Strict duration type. MUST BE EXACTLY ONE OF the enum values.", default="CONTINUOUS")
+    
+    durationValue: Optional[int] = Field(description="The numeric value 'X' for FOR_X durations.", default=None)
+    
+    time: Optional[str] = Field(description="A single ISO datetime or HH:mm string. Required if frequency is ONCE.", default=None)
+    startDate: Optional[str] = Field(description="ISO string representing when the reminder schedule begins (e.g. 2026-03-08T00:00:00Z).", default=None)
+
+@tool("schedule_reminder", args_schema=ScheduleReminderInput)
+def schedule_reminder(
+    medicine_name: str, 
+    dosage: str, 
+    config: RunnableConfig,
+
+    frequency: str = "ONCE",
+    frequencyValue: Optional[int] = None,
+    specificTimes: Optional[List[str]] = None,
+    duration: str = "CONTINUOUS",
+    durationValue: Optional[int] = None,
+    time: Optional[str] = None,
+    startDate: Optional[str] = None
+) -> Dict[str, Any]:
+    """Writes a new reminder to the database."""
+    user_id = config.get("configurable", {}).get("thread_id")
+    try:
+        url = f"{MEDICINE_SCHEDULER_URL}/reminders/{user_id}"
         payload = {
-            "userId": user_id,
             "medicineName": medicine_name,
             "dosage": dosage,
-            "schedule": {
-                "frequency": frequency,
-                "time": time,
-                "startDate": start_date,
-                "endDate": end_date
-            }
+            "frequency": frequency,
+            "duration": duration
         }
-        # Clean up None values
-        payload = {k: v for k, v in payload.items() if v is not None}
-        if "schedule" in payload:
-             payload["schedule"] = {k: v for k, v in payload["schedule"].items() if v is not None}
-
+        
+        # Add optional fields only if provided to prevent sending nulls confusing the db
+        if frequencyValue is not None: payload["frequencyValue"] = frequencyValue
+        if specificTimes is not None: payload["specificTimes"] = specificTimes
+        if durationValue is not None: payload["durationValue"] = durationValue
+        if time is not None: payload["time"] = time
+        if startDate is not None: payload["startDate"] = startDate
+        
         response = requests.post(url, json=payload)
         response.raise_for_status()
         return response.json()
     except requests.RequestException as e:
-        logger.error(f"Error calling schedule_medicine: {e}")
-        return {"error": str(e), "message": "Failed to schedule medicine."}
+        logger.error(f"Error calling schedule_reminder: {e}")
+        return {"error": str(e), "message": "Failed to schedule. Did you provide the exact ENUM literal values?"}
 
-class GetRemindersInput(BaseModel):
-    user_id: str = Field(description="The unique identifier of the user.")
+class GenerateMedicalSummaryInput(BaseModel):
+    pass
 
-@tool("get_reminders", args_schema=GetRemindersInput)
-def get_reminders(user_id: str) -> Dict[str, Any]:
-    """
-    Retrieves the list of active medicine reminders for a user.
+@tool("generate_medical_summary", args_schema=GenerateMedicalSummaryInput)
+def generate_medical_summary(config: RunnableConfig) -> Dict[str, Any]:
+    """Generates a medical and clinical summary of the user by getting medications and medical info."""
+    user_id = config.get("configurable", {}).get("thread_id")
+    result = {}
     
-    Use this tool when a user asks 'What are my medicines?' or 'What reminders do I have?'.
-    """
     try:
-        url = f"{MEDICINE_SCHEDULER_URL}/reminders/user/{user_id}"
+        url = f"{PROFILE_MANAGER_URL}/profile/medical-info/{user_id}"
         response = requests.get(url)
-        response.raise_for_status()
-        return response.json()
+        if response.ok:
+            data = response.json()
+            if data.get("success"):
+                result["medical_info"] = data.get("data", {}).get("profile", {}).get("medicalInfo", {})
+            else:
+                 result["medical_info"] = data
+        else:
+            result["medical_info_error"] = f"Status: {response.status_code}"
     except requests.RequestException as e:
-        logger.error(f"Error calling get_reminders: {e}")
-        return {"error": str(e), "message": "Failed to fetch reminders."}
+        result["medical_info_error"] = str(e)
 
-class GetMedicalProfileInput(BaseModel):
-    user_id: str = Field(description="The unique identifier of the user.")
-
-@tool("get_medical_profile", args_schema=GetMedicalProfileInput)
-def get_medical_profile(user_id: str) -> Dict[str, Any]:
-    """
-    Retrieves the user's medical profile, including history, allergies, and conditions.
-    
-    Use this tool to contextually understand the user's health background, 
-    especially when analyzing symptoms or checking for contraindications.
-    """
     try:
-        url = f"{PROFILE_MANAGER_URL}/profile/{user_id}/medical-info"
+        url = f"{MEDICINE_SCHEDULER_URL}/reminders/{user_id}"
         response = requests.get(url)
-        response.raise_for_status()
-        return response.json()
+        if response.ok:
+            result["medications"] = response.json()
+        else:
+            result["medications_error"] = f"Status: {response.status_code}"
     except requests.RequestException as e:
-        logger.error(f"Error calling get_medical_profile: {e}")
-        return {"error": str(e), "message": "Failed to fetch medical profile."}
+        result["medications_error"] = str(e)
+        
+    result["instruction"] = "Analyze this user's medications and medical info to generate a complete clinical summary."
+    return result
 
-# List of tools to be bound to the agent
+@tool("get_current_datetime")
+def get_current_datetime() -> str:
+    """Returns the current precise date and time in ISO format for scheduling and context."""
+    return datetime.now().isoformat()
+
 tools = [
+    get_upcoming_reminders,
+    get_pending_or_missed_reminders,
     analyze_medicine,
-    get_medicine_details,
-    schedule_medicine,
-    get_reminders,
-    get_medical_profile
+    check_medicine_taken,
+    check_schedule_complications,
+    schedule_reminder,
+    generate_medical_summary,
+    get_current_datetime,
 ]
+
+core_tools = tools.copy()
