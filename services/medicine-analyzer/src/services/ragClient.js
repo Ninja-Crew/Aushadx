@@ -21,7 +21,7 @@ async function getIndex() {
   return index;
 }
 
-async function search(query, top_k = 10) {
+async function search(query, top_k = 5) {
   try {
     const idx = await getIndex();
     if (!idx) return [];

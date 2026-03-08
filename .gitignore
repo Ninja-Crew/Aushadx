@@ -82,6 +82,7 @@ test-results/
 *.pickle
 *.joblib
 *.h5
+indexClear.py
 vectors/
 embeddings/
 
@@ -136,5 +137,9 @@ coverage/
 .DS_Store
 Thumbs.db
 
+#k8s
+aushadx-deployment.yaml
 
 profile-client/
+
+keystore.json

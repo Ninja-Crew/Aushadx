@@ -50,7 +50,7 @@ agenda.define('send-medicine-reminder', async (job) => {
     await history.save();
 
     // Send Notification
-    await sendPushNotification(reminder.userId, message);
+    await sendPushNotification(reminder.userId, message, reminderId);
 
     if (reminder.type === 'once' || reminder.frequency === 'ONCE') {
       reminder.status = 'completed';
@@ -67,22 +67,67 @@ export const startScheduler = async () => {
 };
 
 export const scheduleReminder = async (reminder) => {
-  const { _id, frequency, frequencyValue, specificTimes, specificWeekDays, specificDayOfMonth, time } = reminder;
+  const { _id, frequency, frequencyValue, specificTimes, specificWeekDays, specificDayOfMonth, time, timezone, status } = reminder;
   const reminderId = _id.toString();
+  const tz = timezone || 'UTC';
 
   // Helper to standardise job data
-  const jobData = { reminderId: _id };
+  const jobData = { reminderId };
 
   // Cancel any existing jobs for this reminder (important for updates)
   await cancelReminderJobs(_id);
 
+  // If the reminder is immediately invalid/completed upon creation or update, don't schedule
+  if (status && status !== 'active') {
+    console.log(`[SCHEDULER] Skipping scheduling for ${reminderId} as status is ${status}`);
+    return;
+  }
+
   if (frequency === 'ONCE') {
-    if (time) {
+    // Client sends startDate as a full ISO datetime combining the chosen date + time
+    if (reminder.startDate) {
+      const scheduleDate = new Date(reminder.startDate);
+      if (scheduleDate > new Date()) {
+        await agenda.schedule(scheduleDate, 'send-medicine-reminder', jobData);
+      } else {
+        console.warn(`[SCHEDULER] ONCE reminder ${reminderId} startDate is in the past, skipping.`);
+      }
+    } else if (specificTimes && specificTimes.length > 0) {
+      // Legacy fallback: reconstruct from time only (schedules today or tomorrow)
+      for (const timeStr of specificTimes) {
+        const [hour, minute] = timeStr.split(':');
+        const scheduleDate = new Date();
+        scheduleDate.setHours(parseInt(hour, 10), parseInt(minute, 10), 0, 0);
+        if (scheduleDate <= new Date()) {
+          scheduleDate.setDate(scheduleDate.getDate() + 1);
+        }
+        await agenda.schedule(scheduleDate, 'send-medicine-reminder', jobData);
+      }
+    } else if (time) {
       await agenda.schedule(time, 'send-medicine-reminder', jobData);
     }
-  } 
+  }
+  else if (frequency === 'DAILY') {
+    // Schedule once per day at the specified start time
+    if (specificTimes && specificTimes.length > 0) {
+      const [hour, minute] = specificTimes[0].split(':');
+      const cron = `${parseInt(minute, 10)} ${parseInt(hour, 10)} * * *`;
+      const job = agenda.create('send-medicine-reminder', jobData);
+      job.repeatEvery(cron, { skipImmediate: true, timezone: tz });
+      await job.save();
+    }
+  }
   else if (frequency === 'EVERY_X_HOURS') {
     const job = agenda.create('send-medicine-reminder', jobData);
+    if (specificTimes && specificTimes.length > 0) {
+      const [hour, minute] = specificTimes[0].split(':');
+      const scheduleDate = new Date();
+      scheduleDate.setHours(parseInt(hour, 10), parseInt(minute, 10), 0, 0);
+      if (scheduleDate <= new Date()) {
+        scheduleDate.setDate(scheduleDate.getDate() + 1); // optionally start next occurrence tomorrow if missed
+      }
+      job.schedule(scheduleDate);
+    }
     job.repeatEvery(`${frequencyValue} hours`);
     await job.save();
   }
@@ -95,56 +140,59 @@ export const scheduleReminder = async (reminder) => {
       // Schedule a recurring job for EACH specific time
       if (specificTimes && specificTimes.length > 0) {
           for (const timeStr of specificTimes) {
-              // timeStr is "HH:mm"
-              // Cron format: "mm HH * * *"
               const [hour, minute] = timeStr.split(':');
-              const cron = `${minute} ${hour} * * *`;
+              const cron = `${parseInt(minute, 10)} ${parseInt(hour, 10)} * * *`;
               
               const job = agenda.create('send-medicine-reminder', jobData);
-              job.repeatEvery(cron, { skipImmediate: true });
+              job.repeatEvery(cron, { skipImmediate: true, timezone: tz });
               await job.save();
           }
       }
   }
   else if (frequency === 'SPECIFIC_WEEK_DAYS') {
       // specificWeekDays is array of numbers 0-6 (Sun-Sat)
-      // We also need time (or specificTimes? Assuming single time for now if not X_TIMES_DAILY logic mixed)
-      // Usually "Specific Days" implies a specific time on those days.
-      // Let's assume `time` field holds the time of day, or `specificTimes`?
-      // User request "X_TIMES_DAILY" was separate.
-      // Let's assume if simple frequency, use `time` for the time-of-day.
-      const timeDate = time ? new Date(time) : new Date(); // Fallback
-      const minute = timeDate.getMinutes();
-      const hour = timeDate.getHours();
-
       if (specificWeekDays && specificWeekDays.length > 0) {
           const daysStr = specificWeekDays.join(','); // e.g. "1,3,5"
-          const cron = `${minute} ${hour} * * ${daysStr}`;
-           
-          const job = agenda.create('send-medicine-reminder', jobData);
-          job.repeatEvery(cron, { skipImmediate: true });
-          await job.save();
+          const times = (specificTimes && specificTimes.length > 0) 
+            ? specificTimes 
+            : (time ? [`${new Date(time).getHours()}:${new Date(time).getMinutes()}`] : []);
+
+          for (const timeStr of times) {
+            const [hour, minute] = timeStr.split(':');
+            const cron = `${parseInt(minute, 10)} ${parseInt(hour, 10)} * * ${daysStr}`;
+             
+            const job = agenda.create('send-medicine-reminder', jobData);
+            job.repeatEvery(cron, { skipImmediate: true, timezone: tz });
+            await job.save();
+          }
       }
   }
   else if (frequency === 'SPECIFIC_DAY_OF_MONTH') {
-       const timeDate = time ? new Date(time) : new Date();
-       const minute = timeDate.getMinutes();
-       const hour = timeDate.getHours();
-       
        if (specificDayOfMonth) {
-           const cron = `${minute} ${hour} ${specificDayOfMonth} * *`;
-           const job = agenda.create('send-medicine-reminder', jobData);
-           job.repeatEvery(cron, { skipImmediate: true });
-           await job.save();
+           const times = (specificTimes && specificTimes.length > 0) 
+            ? specificTimes 
+            : (time ? [`${new Date(time).getHours()}:${new Date(time).getMinutes()}`] : []);
+
+           for (const timeStr of times) {
+               const [hour, minute] = timeStr.split(':');
+               const cron = `${parseInt(minute, 10)} ${parseInt(hour, 10)} ${specificDayOfMonth} * *`;
+               const job = agenda.create('send-medicine-reminder', jobData);
+               job.repeatEvery(cron, { skipImmediate: true, timezone: tz });
+               await job.save();
+           }
        }
   }
 };
 
 export const cancelReminderJobs = async (reminderId) => {
-    // Agenda queries by data in the job
-  await agenda.cancel({ 'data.reminderId': reminderId });
-  // Also stringify comparison if needed depending on how agenda stored it, but mongoose ID usually matches
-  // agenda stores data as object.
+  // Agenda queries by data in the job
+  // Some jobs may exist with _id as ObjectId and some as String, so clean both
+  await agenda.cancel({ 
+    $or: [
+       { 'data.reminderId': reminderId.toString() },
+       { 'data.reminderId': mongoose.Types.ObjectId.isValid(reminderId) ? new mongoose.Types.ObjectId(reminderId) : reminderId }
+    ]
+  });
 };
 
 export default agenda;

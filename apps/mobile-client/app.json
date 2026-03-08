@@ -1,0 +1,60 @@
+{
+  "expo": {
+    "name": "AushadX",
+    "slug": "mobile-client",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "config": {
+        "googleMapsApiKey": "AIzaSyD8HCvRVMc3G_9fdrN6u636rVRLE2rHdnE"
+      }
+    },
+    "android": {
+      "softwareKeyboardLayoutMode": "resize",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.anonymous.mobileclient",
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.VIBRATE",
+        "android.permission.WAKE_LOCK",
+        "android.permission.RECEIVE_BOOT_COMPLETED"
+      ],
+      "googleServicesFile": "./google-services.json",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyD8HCvRVMc3G_9fdrN6u636rVRLE2rHdnE"
+        }
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-secure-store",
+      "@react-native-firebase/app",
+      "@react-native-firebase/messaging",
+      "./plugins/withNotifee"
+    ],
+    "extra": {
+      "googleMapsApiKey": "AIzaSyD8HCvRVMc3G_9fdrN6u636rVRLE2rHdnE",
+      "baseUrl": "https://sumptuous-mauro-scribbly.ngrok-free.dev",
+      "apiHeaders": {
+        "ngrok-skip-browser-warning": "true"
+      }
+    }
+  }
+}
