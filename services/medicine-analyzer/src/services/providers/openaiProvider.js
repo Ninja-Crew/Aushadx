@@ -23,25 +23,23 @@ export async function callStructured(prompt, zodSchema, retries = MAX_RETRIES) {
 
   for (let i = 0; i < retries; i++) {
     try {
-      const response = await openai.responses.parse({
-      model: "gpt-4o-2024-08-06",
-      input: [
-        {
-          role: "system",
-          content: "Extract structured medicine information."
-        },
-        {
-          role: "user",
-          content: buildPrompt(user_data, medicalInfo, ragContext)
-        }
-      ],
-      text: {
-        format: zodTextFormat(medicineSchema, "medicine")
-      }
-    });
+      const { zodResponseFormat } = await import("openai/helpers/zod");
+      const response = await client.chat.completions.create({
+        model: modelName,
+        messages: [
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        response_format: zodResponseFormat(zodSchema, "MySchema"),
+      });
 
-    const medicine = response.output_parsed;
-    return medicine;
+      const text = response.choices?.[0]?.message?.content;
+      if (!text) {
+        throw new Error("No text found");
+      }
+      return JSON.parse(text);
     } catch (e) {
       logger.error(`OpenAI attempt ${i + 1} failed`, e.message);
       if (i === retries - 1) {

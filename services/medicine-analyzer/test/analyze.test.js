@@ -5,10 +5,12 @@ import request from "supertest";
 jest.unstable_mockModule("../src/services/llmClient.js", () => ({
   default: {
     callStructured: jest.fn().mockResolvedValue({
+      is_medicine_label: true,
       drug_name: "Mock Drug",
       recommendations: ["Take with water"],
     }),
     callGeminiStructured: jest.fn().mockResolvedValue({
+      is_medicine_label: true,
       drug_name: "Mock Drug",
       recommendations: ["Take with water"],
     }),

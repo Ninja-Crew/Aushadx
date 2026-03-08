@@ -45,6 +45,11 @@ export const createReminder = async (req, res) => {
       calcedEndDate = calculateEndDate(new Date(), duration, durationValue);
     }
 
+    // For ONCE reminders, startDate should match the scheduled time, not default to now
+    const resolvedStartDate = (frequency === 'ONCE' && !startDate && time)
+      ? new Date(time)
+      : startDate;
+
     const reminder = new Reminder({
       userId,
       medicineName,
@@ -57,7 +62,7 @@ export const createReminder = async (req, res) => {
       duration,
       durationValue,
       endDate: calcedEndDate,
-      startDate,
+      startDate: resolvedStartDate,
       time,
       timezone,
       type: frequency === 'ONCE' ? 'once' : 'recurring'
