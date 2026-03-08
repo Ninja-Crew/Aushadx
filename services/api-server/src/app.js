@@ -166,6 +166,35 @@ app.use(
   }
 );
 
+const agentHttpUrl = AGENT_SERVICE_URL.replace("ws://", "http://").replace("wss://", "https://");
+
+const agentProxy = createProxyMiddleware({
+  target: agentHttpUrl,
+  changeOrigin: true,
+  onProxyReq: injectUserHeader,
+  proxyTimeout: 5000,
+});
+
+app.get("/chats", verifyToken, (req, res, next) => {
+  req.url = `/chats/${req.user.sub}`;
+  agentProxy(req, res, next);
+});
+
+app.get("/chats/:chatId/messages", verifyToken, (req, res, next) => {
+  req.url = `/chats/${req.params.chatId}/messages/${req.user.sub}`;
+  agentProxy(req, res, next);
+});
+
+app.delete("/chats/:chatId", verifyToken, (req, res, next) => {
+  req.url = `/chats/${req.params.chatId}/${req.user.sub}`;
+  agentProxy(req, res, next);
+});
+
+app.put("/chats/:chatId", verifyToken, (req, res, next) => {
+  req.url = `/chats/${req.params.chatId}/${req.user.sub}`;
+  agentProxy(req, res, next);
+});
+
 // Body parser for non-proxy routes (if any)
 app.use(express.json());
 

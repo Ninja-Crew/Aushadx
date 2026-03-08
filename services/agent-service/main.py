@@ -2,10 +2,11 @@ import os
 import json
 import jwt
 from typing import List
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Header
 from pydantic import BaseModel
 from agent.graph import graph
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, ToolMessage
+from database import create_chat, update_chat_timestamp, get_user_chats, get_chat, delete_chat, update_chat_title
 from utils.logger import logger
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -83,48 +84,56 @@ async def websocket_endpoint(websocket: WebSocket):
     logger.info(f"User ID from token/header: {user_id}")
     await manager.connect(websocket)
     
-    # Initialize config for this user session
-    config = {"configurable": {"thread_id": user_id}}
+    chat_id = websocket.query_params.get("chatId")
+    if not chat_id:
+        import uuid
+        chat_id = str(uuid.uuid4())
+    
+    # Initialize config for this user session with chat_id
+    config = {"configurable": {"thread_id": chat_id}}
+    chat_created_in_session = False
     
     try:
         while True:
             data = await websocket.receive_text()
             logger.info(f"Received from {user_id}: {data}")
             
-            inputs = {"messages": [HumanMessage(content=data)]}
+            # Extract plain text from JSON payload 
+            try:
+                parsed_data = json.loads(data)
+                user_message = parsed_data.get("message", data)
+            except json.JSONDecodeError:
+                user_message = data
             
-            # Streaming response or single response?
-            # Creating a generator to stream back chunks if graph supports it.
-            # Using ainvoke for now to keep it simple as per original code, but WS allows streaming.
+            if not chat_created_in_session:
+                chat_doc = await get_chat(chat_id, user_id)
+                if not chat_doc:
+                    title = user_message[:30].strip() + ("..." if len(user_message) > 30 else "")
+                    await create_chat(user_id=user_id, chat_id=chat_id, title=title)
+                else:
+                    await update_chat_timestamp(chat_id, user_id)
+                chat_created_in_session = True
+            else:
+                await update_chat_timestamp(chat_id, user_id)
+
+            # Normal chat turn
+            inputs = {"messages": [HumanMessage(content=user_message)]}
             
-            # Let's try to stream if possible, or just await result.
-            # result = await graph.ainvoke(inputs, config=config)
-            # response_content = result["messages"][-1].content
-            # await manager.send_personal_message(response_content, websocket)
-            
-            # Using stream for better UX
-            # logger.info("Invoking graph stream...")
-            async for event in graph.astream_events(inputs, config=config, version="v1"):
-                kind = event["event"]
-                if kind == "on_chat_model_stream":
-                    chunk = event["data"]["chunk"]
-                    content = chunk.content
-                    if content:
-                        if isinstance(content, str):
-                            await manager.send_personal_message(content, websocket)
-                        elif isinstance(content, list):
-                            for item in content:
+            # Resume graph execution
+            async for msg, metadata in graph.astream(inputs, config=config, stream_mode="messages"):
+                if msg.content:
+                    # Ignore tool messages being streamed, only send Assistant generated responses
+                    if getattr(msg, 'type', '') == 'ai':
+                        if isinstance(msg.content, str):
+                            await manager.send_personal_message(msg.content, websocket)
+                        elif isinstance(msg.content, list):
+                            for item in msg.content:
                                 if isinstance(item, dict) and "text" in item:
                                     await manager.send_personal_message(item["text"], websocket)
                         else:
-                            await manager.send_personal_message(str(content), websocket)
-            # logger.info("Graph stream finished for this turn.")
-                        
-            # Determine if we need to send a "Done" signal or just let the stream end for this turn.
-            # A simple way is to just send the text chunks. 
-            # If the client needs to know when turn ends, we might need a protocol.
-            # For now, simplistic streaming.
+                            await manager.send_personal_message(str(msg.content), websocket)
             
+
     except WebSocketDisconnect:
         manager.disconnect(websocket)
         logger.info(f"Client {user_id} disconnected")
@@ -139,6 +148,53 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.get("/health")
 def health_check():
     return {"status": "ok", "service": "agent-service"}
+
+@app.get("/chats/{user_id}")
+async def fetch_user_chats_endpoint(user_id: str):
+    return await get_user_chats(user_id)
+
+@app.get("/chats/{chat_id}/messages/{user_id}")
+async def fetch_chat_messages_endpoint(chat_id: str, user_id: str):
+    chat_doc = await get_chat(chat_id, user_id)
+    if not chat_doc:
+        raise HTTPException(status_code=404, detail="Chat not found")
+        
+    config = {"configurable": {"thread_id": chat_id}}
+    state = graph.get_state(config)
+    messages = state.values.get("messages", [])
+    
+    formatted = []
+    for msg in messages:
+         # Skip tool and system messages for simplicity, just show Human and AI
+         if getattr(msg, 'type', '') not in ['human', 'ai']:
+             continue
+         is_user = getattr(msg, 'type', '') == 'human'
+         content = msg.content
+         if isinstance(content, str):
+             if content.strip():
+                 formatted.append({"isUser": is_user, "text": content})
+         elif isinstance(content, list):
+             text_content = " ".join([item.get("text", "") for item in content if isinstance(item, dict) and "text" in item])
+             if text_content.strip():
+                 formatted.append({"isUser": is_user, "text": text_content})
+    return formatted
+
+class UpdateChatRequest(BaseModel):
+    title: str
+
+@app.delete("/chats/{chat_id}/{user_id}")
+async def delete_user_chat(chat_id: str, user_id: str):
+    success = await delete_chat(chat_id, user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Chat not found or already deleted")
+    return {"status": "success", "message": "Chat deleted"}
+
+@app.put("/chats/{chat_id}/{user_id}")
+async def update_user_chat(chat_id: str, user_id: str, body: UpdateChatRequest):
+    success = await update_chat_title(chat_id, user_id, body.title)
+    if not success:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return {"status": "success", "message": "Chat updated"}
 
 if __name__ == "__main__":
     import uvicorn

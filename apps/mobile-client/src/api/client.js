@@ -16,12 +16,13 @@ const getBaseUrl = () => {
   return BASE_URL;
 };
 
-
+const EXTRA_HEADERS = Constants.expoConfig?.extra?.apiHeaders || {};
 
 const client = axios.create({
   baseURL: getBaseUrl(),
   headers: {
     'Content-Type': 'application/json',
+    ...EXTRA_HEADERS,
   },
 });
 
