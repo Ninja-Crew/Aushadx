@@ -137,6 +137,8 @@ coverage/
 .DS_Store
 Thumbs.db
 
+#k8s
+aushadx-deployment.yaml
 
 profile-client/
 

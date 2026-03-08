@@ -1,0 +1,154 @@
+version: '3.8'
+
+# ─────────────────────────────────────────────────────────────
+# AushadX – Docker Compose (local dev / testing)
+#
+# Networking model mirrors Kubernetes:
+#   • Only api-server is exposed on a host port (3000).
+#   • All other services communicate on the internal
+#     "aushadx-net" bridge network only.
+#   • MongoDB data is persisted via a named volume.
+#
+# Before running, copy .env.example → .env and fill in secrets.
+# ─────────────────────────────────────────────────────────────
+
+networks:
+  aushadx-net:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+
+services:
+
+  # ── MongoDB ─────────────────────────────────────────────────
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    networks:
+      - aushadx-net
+    # NOT exposed to the host – internal only (mirrors k8s ClusterIP)
+    expose:
+      - "27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: aushadx
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── profile-manager (port 3001) ──────────────────────────────
+  profile-manager:
+    build: ./services/profile-manager
+    image: aushadx/profile-manager:latest
+    restart: unless-stopped
+    networks:
+      - aushadx-net
+    expose:
+      - "3001"
+    environment:
+      PORT: "3001"
+      NODE_ENV: development
+      MONGO_URI: "mongodb://mongodb:27017/aushadx"
+      JWT_SECRET: "${JWT_SECRET}"
+      JWT_ACCESS_SECRET: "${JWT_ACCESS_SECRET}"
+      JWT_REFRESH_SECRET: "${JWT_REFRESH_SECRET}"
+      JWT_ACCESS_EXPIRES_IN: "15m"
+      JWT_REFRESH_EXPIRES_IN: "7d"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  # ── medicine-analyzer (port 3002) ────────────────────────────
+  medicine-analyzer:
+    build: ./services/medicine-analyzer
+    image: aushadx/medicine-analyzer:latest
+    restart: unless-stopped
+    networks:
+      - aushadx-net
+    expose:
+      - "3002"
+    environment:
+      PORT: "3002"
+      NODE_ENV: development
+      LLM_PROVIDER: "${LLM_PROVIDER:-gemini}"
+      LLM_MODEL: "${LLM_MODEL:-gemini-2.5-flash}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      PROFILE_SERVICE_URL: "http://profile-manager:3001"
+      PROPAGATE_AUTH: "true"
+      GEMINI_API_KEY: "${GEMINI_API_KEY}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      PINECONE_API_KEY: "${PINECONE_API_KEY}"
+      PINECONE_INDEX: "${PINECONE_INDEX}"
+      PINECONE_INDEX_HOST: "${PINECONE_INDEX_HOST}"
+      PINECONE_NAMESPACE: "${PINECONE_NAMESPACE:-medicine_kb_v1}"
+    depends_on:
+      - profile-manager
+
+  # ── medicine-scheduler (port 3003) ───────────────────────────
+  medicine-scheduler:
+    build: ./services/medicine-scheduler
+    image: aushadx/medicine-scheduler:latest
+    restart: unless-stopped
+    networks:
+      - aushadx-net
+    expose:
+      - "3003"
+    environment:
+      PORT: "3003"
+      NODE_ENV: development
+      MONGO_URI: "mongodb://mongodb:27017/aushadx"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  # ── agent-service (port 3004) ────────────────────────────────
+  agent-service:
+    build: ./services/agent-service
+    image: aushadx/agent-service:latest
+    restart: unless-stopped
+    networks:
+      - aushadx-net
+    expose:
+      - "3004"
+    environment:
+      PORT: "3004"
+      PROFILE_SERVICE_URL: "http://profile-manager:3001"
+      MEDICINE_ANALYZER_URL: "http://medicine-analyzer:3002"
+      MEDICINE_SCHEDULER_URL: "http://medicine-scheduler:3003"
+      GEMINI_API_KEY: "${GEMINI_API_KEY}"
+      GOOGLE_API_KEY: "${GEMINI_API_KEY}"   # agent-service alias
+      GEMINI_MODEL: "${GEMINI_MODEL:-gemini-2.5-flash}"
+    depends_on:
+      - profile-manager
+
+  # ── api-server / API Gateway (port 3000) ─────────────────────
+  # The ONLY service published to the host machine.
+  api-server:
+    build: ./services/api-server
+    image: aushadx/api-server:latest
+    restart: unless-stopped
+    networks:
+      - aushadx-net
+    ports:
+      - "3000:3000"   # ← externally reachable; all others use expose only
+    environment:
+      PORT: "3000"
+      NODE_ENV: development
+      PROFILE_SERVICE_URL: "http://profile-manager:3001"
+      JWKS_URI: "http://profile-manager:3001/.well-known/jwks.json"
+      MEDICINE_SCHEDULER_URL: "http://medicine-scheduler:3003"
+      MEDICINE_ANALYZER_URL: "http://medicine-analyzer:3002"
+      AGENT_SERVICE_URL: "ws://agent-service:3004"
+      JWT_SECRET: "${JWT_SECRET}"
+      JWT_ACCESS_SECRET: "${JWT_ACCESS_SECRET}"
+      JWT_REFRESH_SECRET: "${JWT_REFRESH_SECRET}"
+    depends_on:
+      - profile-manager
+      - medicine-analyzer
+      - medicine-scheduler
+      - agent-service

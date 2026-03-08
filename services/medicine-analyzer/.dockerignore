@@ -1,0 +1,40 @@
+# Dependency directories
+node_modules/
+npm-debug.log*
+__pycache__/
+*.pyc
+
+# Source control
+.git
+.gitignore
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Tests and test utilities
+test/
+tests/
+__tests__/
+*.test.js
+*.spec.js
+*.test.ts
+*.spec.ts
+pytest.ini
+.pytest_cache/
+coverage/
+.coverage
+htmlcov/
+
+# Scripts and tools
+scripts/
+nodemon.json
+jest.config.js
+
+# Misc
+Dockerfile
+README.md
+kubernetes/
+k8s/
+docker-compose.yml

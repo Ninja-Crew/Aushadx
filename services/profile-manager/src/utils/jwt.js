@@ -16,7 +16,7 @@ export function signAccessToken(payload) {
       kid: key.kid,
     },
   };
-  return jwt.sign(payload, key.toPEM(true), options);
+  return jwt.sign({...payload,type:"access"}, key.toPEM(true), options);
 }
 
 export function signRefreshToken(payload) {
@@ -28,7 +28,7 @@ export function signRefreshToken(payload) {
       kid: key.kid,
     },
   };
-  return jwt.sign(payload, key.toPEM(true), options);
+  return jwt.sign({...payload,type:"refresh"}, key.toPEM(true), options);
 }
 
 export function verifyAccessToken(token) {
