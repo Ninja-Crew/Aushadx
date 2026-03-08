@@ -11,6 +11,7 @@ import {
   Platform,
   Switch
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
 import { createReminder, updateReminder, deleteReminder } from '../api/reminders';
 import { spacing } from '../styles/theme';
@@ -20,6 +21,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 const FREQUENCY_TYPES = [
   { label: 'Once', value: 'ONCE' },
+  { label: 'Daily', value: 'DAILY' },
   { label: 'X Times Daily', value: 'X_TIMES_DAILY' },
   { label: 'Every X Hours', value: 'EVERY_X_HOURS' },
   { label: 'Every X Minutes', value: 'EVERY_X_MINUTES' },
@@ -28,6 +30,7 @@ const FREQUENCY_TYPES = [
 ];
 
 const DURATION_TYPES = [
+  { label: 'Single Day (One-time)', value: 'SINGLE_DAY' },
   { label: 'Continuous', value: 'CONTINUOUS' },
   { label: 'For X Days', value: 'FOR_X_DAYS' },
   { label: 'For X Weeks', value: 'FOR_X_WEEKS' },
@@ -45,6 +48,25 @@ const AddEditReminderScreen = ({ route, navigation }) => {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // Date picker state
+  const [showOnceDatePicker, setShowOnceDatePicker] = useState(false);
+  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const getCurrentTimeStr = () => {
+    const d = new Date();
+    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+  };
+
+  const getCurrentDateStr = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const [formData, setFormData] = useState({
     medicineName: '',
     dosage: '',
@@ -52,8 +74,9 @@ const AddEditReminderScreen = ({ route, navigation }) => {
     frequencyValue: '',
     specificWeekDays: [], // Array of numbers 0-6
     specificDayOfMonth: '',
-    specificTimes: ['08:00'], // Default one time
-    duration: 'CONTINUOUS',
+    specificTimes: [getCurrentTimeStr()], // Default one time
+    onceDate: getCurrentDateStr(), // For ONCE — today's date YYYY-MM-DD
+    duration: 'SINGLE_DAY', // Matches ONCE default frequency
     durationValue: '',
     endDate: '', // For UNTIL_DATE, format YYYY-MM-DD
   });
@@ -67,13 +90,36 @@ const AddEditReminderScreen = ({ route, navigation }) => {
         frequencyValue: reminderData.frequencyValue ? String(reminderData.frequencyValue) : '',
         specificWeekDays: reminderData.specificWeekDays || [],
         specificDayOfMonth: reminderData.specificDayOfMonth ? String(reminderData.specificDayOfMonth) : '',
-        specificTimes: reminderData.specificTimes && reminderData.specificTimes.length > 0 ? reminderData.specificTimes : ['08:00'],
+        specificTimes: reminderData.specificTimes && reminderData.specificTimes.length > 0 ? reminderData.specificTimes : [getCurrentTimeStr()],
+        onceDate: reminderData.startDate ? new Date(reminderData.startDate).toISOString().split('T')[0] : getCurrentDateStr(),
         duration: reminderData.duration || 'CONTINUOUS',
         durationValue: reminderData.durationValue ? String(reminderData.durationValue) : '',
         endDate: reminderData.endDate ? new Date(reminderData.endDate).toISOString().split('T')[0] : '',
       });
     }
   }, [isEditMode, reminderData]);
+
+  useEffect(() => {
+    if (formData.frequency === 'X_TIMES_DAILY') {
+      const count = parseInt(formData.frequencyValue, 10);
+      if (!isNaN(count) && count > 0 && count <= 24) {
+        setFormData(prev => {
+          let newTimes = [...prev.specificTimes];
+          if (newTimes.length < count) {
+            const toAdd = count - newTimes.length;
+            const extra = Array(toAdd).fill('08:00');
+            newTimes = newTimes.concat(extra);
+          } else if (newTimes.length > count) {
+            newTimes = newTimes.slice(0, count);
+          }
+          if (newTimes.length !== prev.specificTimes.length) {
+            return { ...prev, specificTimes: newTimes };
+          }
+          return prev;
+        });
+      }
+    }
+  }, [formData.frequency, formData.frequencyValue]);
 
   const toggleWeekDay = (dayIndex) => {
     setFormData((prev) => {
@@ -103,11 +149,52 @@ const AddEditReminderScreen = ({ route, navigation }) => {
     setFormData({ ...formData, specificTimes: times });
   };
 
+  const getErrors = () => {
+    const errors = {};
+    const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    
+    if (formData.frequency === 'X_TIMES_DAILY') {
+      if (!formData.specificTimes || formData.specificTimes.length === 0) {
+        errors.time_0 = 'Please provide valid time(s)';
+      } else {
+        formData.specificTimes.forEach((time, index) => {
+          if (!timeRegex.test(time)) errors[`time_${index}`] = 'Invalid time format (HH:MM)';
+        });
+      }
+    } else {
+      if (!timeRegex.test(formData.specificTimes[0] || '')) {
+        errors.time_0 = 'Invalid time format (HH:MM)';
+      }
+    }
+
+    if (formData.frequency === 'ONCE') {
+      if (!formData.onceDate) {
+        errors.dateTime = 'Date is required';
+      } else if (!errors.time_0) {
+        const now = new Date();
+        now.setSeconds(0, 0);
+
+        const [year, month, day] = formData.onceDate.split('-');
+        const selectedDate = new Date(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10));
+        const [hour, minute] = formData.specificTimes[0].split(':');
+        selectedDate.setHours(parseInt(hour, 10), parseInt(minute, 10), 0, 0);
+
+        if (selectedDate < now) {
+          errors.dateTime = 'Date and time cannot be in the past';
+        }
+      }
+    }
+    return errors;
+  };
+
+  const currentErrors = getErrors();
+  const hasLiveErrors = Object.keys(currentErrors).length > 0;
+
   const validateForm = () => {
     if (!formData.medicineName.trim()) return 'Medicine Name is required';
     if (!formData.dosage.trim()) return 'Dosage is required';
     
-    if (['X_TIMES_DAILY', 'EVERY_X_HOURS', 'EVERY_X_MINUTES'].includes(formData.frequency) && !formData.frequencyValue) {
+    if (['EVERY_X_HOURS', 'EVERY_X_MINUTES', 'X_TIMES_DAILY'].includes(formData.frequency) && !formData.frequencyValue) {
       return `Frequency value is required for ${formData.frequency}`;
     }
     if (formData.frequency === 'SPECIFIC_WEEK_DAYS' && formData.specificWeekDays.length === 0) {
@@ -117,15 +204,15 @@ const AddEditReminderScreen = ({ route, navigation }) => {
       return 'Please enter a day of the month';
     }
 
+    if (hasLiveErrors) {
+      return Object.values(currentErrors)[0];
+    }
+
     if (['FOR_X_DAYS', 'FOR_X_WEEKS', 'FOR_X_MONTHS'].includes(formData.duration) && !formData.durationValue) {
       return `Duration value is required for ${formData.duration}`;
     }
     if (formData.duration === 'UNTIL_DATE' && !formData.endDate) {
       return 'End date is required';
-    }
-
-    if (formData.specificTimes.length === 0 || formData.specificTimes.some(t => !t.trim())) {
-      return 'Please provide valid time(s) (format HH:MM)';
     }
 
     return null; // Valid
@@ -146,17 +233,32 @@ const AddEditReminderScreen = ({ route, navigation }) => {
         dosage: formData.dosage,
         frequency: formData.frequency,
         duration: formData.duration,
-        specificTimes: formData.specificTimes,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
       };
 
-      if (['X_TIMES_DAILY', 'EVERY_X_HOURS', 'EVERY_X_MINUTES'].includes(formData.frequency)) {
+      if (formData.frequency === 'X_TIMES_DAILY') {
+        payload.specificTimes = formData.specificTimes;
         payload.frequencyValue = parseInt(formData.frequencyValue, 10);
-      }
-      if (formData.frequency === 'SPECIFIC_WEEK_DAYS') {
-        payload.specificWeekDays = formData.specificWeekDays;
-      }
-      if (formData.frequency === 'SPECIFIC_DAY_OF_MONTH') {
-        payload.specificDayOfMonth = parseInt(formData.specificDayOfMonth, 10);
+      } else {
+        payload.specificTimes = [formData.specificTimes[0]];
+
+        if (formData.frequency === 'ONCE') {
+          // Combine date + time into a full ISO startDate for precision scheduling
+          const [hour, minute] = formData.specificTimes[0].split(':');
+          const dt = new Date(formData.onceDate);
+          dt.setHours(parseInt(hour, 10), parseInt(minute, 10), 0, 0);
+          payload.startDate = dt.toISOString();
+        }
+
+        if (['EVERY_X_HOURS', 'EVERY_X_MINUTES'].includes(formData.frequency)) {
+          payload.frequencyValue = parseInt(formData.frequencyValue, 10);
+        }
+        if (formData.frequency === 'SPECIFIC_WEEK_DAYS') {
+          payload.specificWeekDays = formData.specificWeekDays;
+        }
+        if (formData.frequency === 'SPECIFIC_DAY_OF_MONTH') {
+          payload.specificDayOfMonth = parseInt(formData.specificDayOfMonth, 10);
+        }
       }
 
       if (['FOR_X_DAYS', 'FOR_X_WEEKS', 'FOR_X_MONTHS'].includes(formData.duration)) {
@@ -245,7 +347,12 @@ const AddEditReminderScreen = ({ route, navigation }) => {
             <View style={styles.pickerContainer}>
               <Picker
                 selectedValue={formData.frequency}
-                onValueChange={(itemValue) => setFormData({...formData, frequency: itemValue})}
+                onValueChange={(itemValue) => setFormData(prev => ({
+                  ...prev,
+                  frequency: itemValue,
+                  // Auto-lock duration to SINGLE_DAY when ONCE is selected
+                  duration: itemValue === 'ONCE' ? 'SINGLE_DAY' : (prev.duration === 'SINGLE_DAY' ? 'CONTINUOUS' : prev.duration),
+                }))}
                 style={styles.picker}
               >
                 {FREQUENCY_TYPES.map(f => <Picker.Item key={f.value} label={f.label} value={f.value} />)}
@@ -253,7 +360,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
             </View>
           </View>
 
-          {['X_TIMES_DAILY', 'EVERY_X_HOURS', 'EVERY_X_MINUTES'].includes(formData.frequency) && (
+          {['EVERY_X_HOURS', 'EVERY_X_MINUTES', 'X_TIMES_DAILY'].includes(formData.frequency) && (
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Frequency Value (X) *</Text>
               <TextInput
@@ -303,29 +410,89 @@ const AddEditReminderScreen = ({ route, navigation }) => {
             </View>
           )}
 
-          <View style={styles.inputGroup}>
-             <Text style={styles.label}>Times of Day (HH:MM) *</Text>
-             {formData.specificTimes.map((time, index) => (
-                <View key={index} style={styles.timeRow}>
+          {formData.frequency === 'ONCE' && (
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Time to Take (HH:MM) *</Text>
+              <TextInput
+                style={[styles.input, (currentErrors.time_0 || currentErrors.dateTime) && { borderColor: colors.error }]}
+                value={formData.specificTimes[0]}
+                onChangeText={(text) => updateTime(0, text)}
+                placeholder="08:00"
+                maxLength={5}
+              />
+              {currentErrors.time_0 ? (
+                <Text style={{ color: colors.error, fontSize: 12, marginTop: 4 }}>{currentErrors.time_0}</Text>
+              ) : null}
+
+              <Text style={[styles.label, { marginTop: spacing.m }]}>Date to Take *</Text>
+              <TouchableOpacity
+                style={[styles.input, styles.dateButton, currentErrors.dateTime && { borderColor: colors.error }]}
+                onPress={() => setShowOnceDatePicker(true)}
+              >
+                <Text style={{ color: colors.text }}>{formData.onceDate}</Text>
+                <MaterialIcons name="calendar-today" size={18} color={colors.primary} />
+              </TouchableOpacity>
+              {currentErrors.dateTime ? (
+                <Text style={{ color: colors.error, fontSize: 12, marginTop: 4 }}>{currentErrors.dateTime}</Text>
+              ) : null}
+              {showOnceDatePicker && (
+                <DateTimePicker
+                  value={new Date(formData.onceDate)}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  minimumDate={today}
+                  onChange={(event, selectedDate) => {
+                    setShowOnceDatePicker(Platform.OS === 'ios');
+                    if (selectedDate) {
+                      const year = selectedDate.getFullYear();
+                      const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                      const day = String(selectedDate.getDate()).padStart(2, '0');
+                      setFormData({ ...formData, onceDate: `${year}-${month}-${day}` });
+                    }
+                  }}
+                />
+              )}
+            </View>
+          )}
+
+          {formData.frequency === 'X_TIMES_DAILY' &&
+           parseInt(formData.frequencyValue, 10) > 0 && (
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Times of Day (HH:MM) *</Text>
+              {formData.specificTimes.map((time, index) => (
+                <View key={index} style={{ marginBottom: spacing.m }}>
+                  <View style={styles.timeRow}>
                     <TextInput
-                      style={[styles.input, {flex: 1}]}
+                      style={[styles.input, { flex: 1 }, currentErrors[`time_${index}`] && { borderColor: colors.error }]}
                       value={time}
                       onChangeText={(text) => updateTime(index, text)}
                       placeholder="08:00"
                       maxLength={5}
                     />
-                    {formData.specificTimes.length > 1 && (
-                      <TouchableOpacity onPress={() => removeTime(index)} style={styles.iconButton}>
-                        <MaterialIcons name="remove-circle-outline" size={24} color={colors.error} />
-                      </TouchableOpacity>
-                    )}
+                  </View>
+                  {currentErrors[`time_${index}`] ? (
+                    <Text style={{ color: colors.error, fontSize: 12, marginTop: -4 }}>{currentErrors[`time_${index}`]}</Text>
+                  ) : null}
                 </View>
-             ))}
-             <TouchableOpacity style={styles.addTimeBtn} onPress={addTime}>
-                <MaterialIcons name="add" size={20} color={colors.primary} />
-                <Text style={styles.addTimeText}>Add Time</Text>
-             </TouchableOpacity>
-          </View>
+              ))}
+            </View>
+          )}
+
+          {formData.frequency !== 'ONCE' && formData.frequency !== 'X_TIMES_DAILY' && (
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Start Time (HH:MM) *</Text>
+              <TextInput
+                style={[styles.input, currentErrors.time_0 && { borderColor: colors.error }]}
+                value={formData.specificTimes[0]}
+                onChangeText={(text) => updateTime(0, text)}
+                placeholder="08:00"
+                maxLength={5}
+              />
+              {currentErrors.time_0 ? (
+                <Text style={{ color: colors.error, fontSize: 12, marginTop: 4 }}>{currentErrors.time_0}</Text>
+              ) : null}
+            </View>
+          )}
 
           <View style={styles.divider} />
 
@@ -333,15 +500,26 @@ const AddEditReminderScreen = ({ route, navigation }) => {
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Duration Type</Text>
-            <View style={styles.pickerContainer}>
+            <View style={[styles.pickerContainer, formData.frequency === 'ONCE' && { opacity: 0.6 }]}>
               <Picker
-                selectedValue={formData.duration}
-                onValueChange={(itemValue) => setFormData({...formData, duration: itemValue})}
+                selectedValue={formData.frequency === 'ONCE' ? 'SINGLE_DAY' : formData.duration}
+                onValueChange={(itemValue) => setFormData({ ...formData, duration: itemValue })}
+                enabled={formData.frequency !== 'ONCE'}
                 style={styles.picker}
               >
-                {DURATION_TYPES.map(d => <Picker.Item key={d.value} label={d.label} value={d.value} />)}
+                {formData.frequency === 'ONCE'
+                  ? <Picker.Item label="Single Day (One-time)" value="SINGLE_DAY" />
+                  : DURATION_TYPES.filter(d => d.value !== 'SINGLE_DAY').map(d =>
+                      <Picker.Item key={d.value} label={d.label} value={d.value} />
+                    )
+                }
               </Picker>
             </View>
+            {formData.frequency === 'ONCE' && (
+              <Text style={[styles.label, { marginTop: 4, fontStyle: 'italic' }]}>
+                Duration is fixed for one-time reminders
+              </Text>
+            )}
           </View>
 
           {['FOR_X_DAYS', 'FOR_X_WEEKS', 'FOR_X_MONTHS'].includes(formData.duration) && (
@@ -358,22 +536,43 @@ const AddEditReminderScreen = ({ route, navigation }) => {
           )}
 
           {formData.duration === 'UNTIL_DATE' && (
-             <View style={styles.inputGroup}>
-              <Text style={styles.label}>End Date (YYYY-MM-DD) *</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.endDate}
-                onChangeText={(text) => setFormData({...formData, endDate: text})}
-                placeholder="2025-12-31"
-              />
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>End Date *</Text>
+              <TouchableOpacity
+                style={[styles.input, styles.dateButton]}
+                onPress={() => setShowEndDatePicker(true)}
+              >
+                <Text style={{ color: formData.endDate ? colors.text : colors.textSecondary }}>
+                  {formData.endDate || 'Select end date'}
+                </Text>
+                <MaterialIcons name="calendar-today" size={18} color={colors.primary} />
+              </TouchableOpacity>
+              {showEndDatePicker && (
+                <DateTimePicker
+                  value={formData.endDate ? new Date(formData.endDate) : today}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  minimumDate={today}
+                  onChange={(event, selectedDate) => {
+                    setShowEndDatePicker(Platform.OS === 'ios');
+                    if (selectedDate) {
+                      setFormData({ ...formData, endDate: selectedDate.toISOString().split('T')[0] });
+                    }
+                  }}
+                />
+              )}
             </View>
           )}
 
           <View style={styles.actions}>
             <TouchableOpacity 
-              style={[styles.actionBtn, styles.saveBtn]}
+              style={[
+                styles.actionBtn, 
+                styles.saveBtn,
+                (saving || hasLiveErrors) && { opacity: 0.6 }
+              ]}
               onPress={handleSave}
-              disabled={saving}
+              disabled={saving || hasLiveErrors}
             >
               <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save Reminder'}</Text>
             </TouchableOpacity>
@@ -404,6 +603,7 @@ const makeStyles = (colors) => StyleSheet.create({
   inputGroup: { marginBottom: spacing.m },
   label: { fontSize: 13, marginBottom: 6, color: colors.textSecondary },
   input: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: spacing.m, fontSize: 16, color: colors.text },
+  dateButton: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   pickerContainer: { borderWidth: 1, borderColor: colors.border, borderRadius: 8, overflow: 'hidden', backgroundColor: colors.card },
   picker: { height: 50, width: '100%', color: colors.text },
   weekDaysContainer: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 },

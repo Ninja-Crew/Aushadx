@@ -19,8 +19,8 @@ app.use(morgan('dev'));
 // Database
 connectDB();
 
-// Scheduler
-startScheduler();
+// Note: Scheduler processing (startScheduler) has been moved to src/worker.js
+// The API solely manages scheduling jobs into MongoDB.
 
 // Routes
 app.use('/reminders', reminderRoutes);

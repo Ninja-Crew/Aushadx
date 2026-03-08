@@ -4,11 +4,13 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useTheme } from '../context/ThemeContext';
 import { removeToken } from '../utils/storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNotificationContext } from '../context/NotificationContext';
 
 const CustomHeader = ({ title, navigation, token }) => {
   const { colors, isDark, toggleTheme } = useTheme();
   const [isOptionsVisible, setIsOptionsVisible] = useState(false);
   const insets = useSafeAreaInsets();
+  const { unreadCount } = useNotificationContext();
 
   const handleSos = () => {
     // 112 is a common emergency number, or change as needed
@@ -31,7 +33,15 @@ const CustomHeader = ({ title, navigation, token }) => {
           <Text style={[styles.headerTitle, { color: colors.text }]}>{title}</Text>
         </View>
 
-        <View style={[styles.headerSide, { alignItems: 'flex-end' }]}>
+        <View style={[styles.headerSide, { alignItems: 'flex-end', flexDirection: 'row', justifyContent: 'flex-end', gap: 16 }]}>
+          <TouchableOpacity style={[styles.headerIcon, { position: 'relative' }]} onPress={() => navigation.navigate('Notifications', { token })}>
+            <MaterialIcons name="notifications" size={24} color={colors.text} />
+            {unreadCount > 0 && (
+               <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{unreadCount}</Text>
+               </View>
+            )}
+          </TouchableOpacity>
           <TouchableOpacity style={styles.headerIcon} onPress={() => setIsOptionsVisible(true)}>
             <MaterialIcons name="menu" size={24} color={colors.text} />
           </TouchableOpacity>
@@ -113,6 +123,25 @@ const styles = StyleSheet.create({
   sosText: { color: '#fff', fontWeight: '700', fontSize: 13 },
   headerTitle: { fontSize: 18, fontWeight: '700', textAlign: 'center' },
   headerIcon: { padding: 4 },
+  badge: {
+    position: 'absolute',
+    top: 0,
+    right: 2,
+    backgroundColor: '#ff4444',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ffffff',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+    paddingHorizontal: 4,
+  },
   
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContent: {

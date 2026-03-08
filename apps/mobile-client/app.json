@@ -26,6 +26,13 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.anonymous.mobileclient",
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.VIBRATE",
+        "android.permission.WAKE_LOCK",
+        "android.permission.RECEIVE_BOOT_COMPLETED"
+      ],
+      "googleServicesFile": "./google-services.json",
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyD8HCvRVMc3G_9fdrN6u636rVRLE2rHdnE"
@@ -37,7 +44,14 @@
     },
     "plugins": [
       "expo-font",
-      "expo-secure-store"
-    ]
+      "expo-secure-store",
+      "@react-native-firebase/app",
+      "@react-native-firebase/messaging",
+      "./plugins/withNotifee"
+    ],
+    "extra": {
+      "googleMapsApiKey": "AIzaSyD8HCvRVMc3G_9fdrN6u636rVRLE2rHdnE",
+      "baseUrl": "http://10.103.47.147:30000"
+    }
   }
 }

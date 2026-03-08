@@ -17,7 +17,9 @@ metadata:
   name: aushadx
 
 ---
-# ─── Secrets (fill in real values before applying) ───────────
+# ─── Secrets ─────────────────────────────────────────────────
+# Values sourced from all service .env files.
+# ⚠ Rotate keys before deploying to production.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -25,16 +27,33 @@ metadata:
   namespace: aushadx
 type: Opaque
 stringData:
-  MONGO_URI: "mongodb://mongodb.aushadx.svc.cluster.local:27017/aushadx"
-  JWT_SECRET: "CHANGE_ME_strong_jwt_secret"
-  JWT_ACCESS_SECRET: "CHANGE_ME_access_secret"
-  JWT_REFRESH_SECRET: "CHANGE_ME_refresh_secret"
-  GEMINI_API_KEY: "YOUR_GEMINI_API_KEY"
-  OPENAI_API_KEY: "YOUR_OPENAI_API_KEY"
-  PINECONE_API_KEY: "YOUR_PINECONE_API_KEY"
-  PINECONE_INDEX: "YOUR_PINECONE_INDEX"
-  PINECONE_INDEX_HOST: "YOUR_PINECONE_INDEX_HOST"
-  PINECONE_NAMESPACE: "medicine"
+  # ── MongoDB ──────────────────────────────────────────────────
+  MONGO_URI: "<YOUR_MONGO_URI>"
+
+  # ── JWT (profile-manager / api-server) ───────────────────────
+  JWT_SECRET: "<YOUR_JWT_SECRET>"
+  JWT_ACCESS_SECRET: "<YOUR_JWT_ACCESS_SECRET>"
+  JWT_REFRESH_SECRET: "<YOUR_JWT_REFRESH_SECRET>"
+
+  # ── LLM provider (medicine-analyzer) ─────────────────────────
+  LLM_PROVIDER: "<YOUR_LLM_PROVIDER>"
+  LLM_MODEL: "<YOUR_LLM_MODEL>"
+
+  # ── Google / Gemini (medicine-analyzer + agent-service) ──────
+  GEMINI_API_KEY: "<YOUR_GEMINI_API_KEY>"
+  GEMINI_MODEL: "<YOUR_GEMINI_MODEL>"                             # agent-service
+
+  # ── OpenAI (medicine-analyzer, optional fallback) ────────────
+  OPENAI_API_KEY: "<YOUR_OPENAI_API_KEY>"
+
+  # ── Pinecone (medicine-analyzer) ─────────────────────────────
+  PINECONE_API_KEY: "<YOUR_PINECONE_API_KEY>"
+  PINECONE_INDEX: "<YOUR_PINECONE_INDEX>"
+  PINECONE_INDEX_HOST: "<YOUR_PINECONE_INDEX_HOST>"
+  PINECONE_NAMESPACE: "<YOUR_PINECONE_NAMESPACE>"
+
+  # ── Logging ───────────────────────────────────────────────────
+  LOG_LEVEL: "info"
 
 ---
 # ════════════════════════════════════════════════════════════
@@ -220,9 +239,20 @@ spec:
             - name: NODE_ENV
               value: "production"
             - name: LLM_PROVIDER
-              value: "gemini"
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: LLM_PROVIDER
             - name: LLM_MODEL
-              value: "gemini-2.0-flash"
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: LLM_MODEL
+            - name: LOG_LEVEL
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: LOG_LEVEL
             # ── profile-manager reference ──────────────────
             - name: PROFILE_SERVICE_HOST
               value: "profile-manager"
@@ -312,6 +342,16 @@ spec:
                 secretKeyRef:
                   name: aushadx-secrets
                   key: MONGO_URI
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: "/etc/firebase/service-account.json"
+          volumeMounts:
+            - name: firebase-key-volume
+              mountPath: /etc/firebase
+              readOnly: true
+      volumes:
+        - name: firebase-key-volume
+          secret:
+            secretName: firebase-admin-key
 ---
 apiVersion: v1
 kind: Service
@@ -325,6 +365,51 @@ spec:
   ports:
     - port: 3003
       targetPort: 3003
+
+---
+# ════════════════════════════════════════════════════════════
+# medicine-scheduler-worker (Daemon)
+# ════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: medicine-scheduler-worker
+  namespace: aushadx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: medicine-scheduler-worker
+  template:
+    metadata:
+      labels:
+        app: medicine-scheduler-worker
+    spec:
+      containers:
+        - name: medicine-scheduler-worker
+          image: aushadx/medicine-scheduler:latest
+          imagePullPolicy: IfNotPresent
+          command: ["npm", "run", "worker"]
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: MONGO_URI
+            - name: PROFILE_SERVICE_URL
+              value: "http://profile-manager:3001"
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: "/etc/firebase/service-account.json"
+          volumeMounts:
+            - name: firebase-key-volume
+              mountPath: /etc/firebase
+              readOnly: true
+      volumes:
+        - name: firebase-key-volume
+          secret:
+            secretName: firebase-admin-key
 
 ---
 # ════════════════════════════════════════════════════════════
@@ -354,19 +439,36 @@ spec:
           env:
             - name: PORT
               value: "3004"
-            # ── profile-manager reference ──────────────────
+            # ── service URLs ────────────────────────────────
             - name: PROFILE_SERVICE_HOST
               value: "profile-manager"
             - name: PROFILE_SERVICE_PORT
               value: "3001"
             - name: PROFILE_SERVICE_URL
               value: "http://$(PROFILE_SERVICE_HOST):$(PROFILE_SERVICE_PORT)"
-            # ──────────────────────────────────────────────
+            - name: MEDICINE_ANALYZER_HOST
+              value: "medicine-analyzer"
+            - name: MEDICINE_ANALYZER_PORT
+              value: "3002"
+            - name: MEDICINE_ANALYZER_URL
+              value: "http://$(MEDICINE_ANALYZER_HOST):$(MEDICINE_ANALYZER_PORT)"
+            - name: MEDICINE_SCHEDULER_HOST
+              value: "medicine-scheduler"
+            - name: MEDICINE_SCHEDULER_PORT
+              value: "3003"
+            - name: MEDICINE_SCHEDULER_URL
+              value: "http://$(MEDICINE_SCHEDULER_HOST):$(MEDICINE_SCHEDULER_PORT)"
+            # ── credentials ─────────────────────────────────
             - name: GEMINI_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: aushadx-secrets
                   key: GEMINI_API_KEY
+            - name: GEMINI_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GEMINI_MODEL
 ---
 apiVersion: v1
 kind: Service

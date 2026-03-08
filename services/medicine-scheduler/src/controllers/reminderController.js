@@ -16,6 +16,9 @@ const calculateEndDate = (startDate, duration, durationValue) => {
     case 'FOR_X_MONTHS':
       end.setMonth(end.getMonth() + (durationValue || 0));
       return end;
+    case 'SINGLE_DAY':
+      end.setHours(23, 59, 59, 999);
+      return end;
     case 'CONTINUOUS':
       return null;
     case 'UNTIL_DATE':
@@ -32,7 +35,9 @@ export const createReminder = async (req, res) => {
       medicineName, dosage, 
       frequency, frequencyValue, specificWeekDays, specificDayOfMonth, specificTimes,
       duration, durationValue, endDate: requestedEndDate,
-      time // Legacy or for ONCE
+      startDate,
+      time, // Legacy or for ONCE
+      timezone
     } = req.body;
 
     let calcedEndDate = requestedEndDate;
@@ -52,7 +57,9 @@ export const createReminder = async (req, res) => {
       duration,
       durationValue,
       endDate: calcedEndDate,
+      startDate,
       time,
+      timezone,
       type: frequency === 'ONCE' ? 'once' : 'recurring'
     });
 
@@ -69,13 +76,15 @@ export const createReminder = async (req, res) => {
 };
 
 export const updateReminder = async (req, res) => {
-  const { reminderId } = req.params;
+  const { reminderId, userId } = req.params;
   try {
-    const {  // ID of the reminder to update
+    const { 
       medicineName, dosage, 
       frequency, frequencyValue, specificWeekDays, specificDayOfMonth, specificTimes,
       duration, durationValue, endDate: requestedEndDate,
-      time
+      startDate,
+      time,
+      timezone
     } = req.body;
 
     if (!reminderId) {
@@ -87,8 +96,15 @@ export const updateReminder = async (req, res) => {
       calcedEndDate = calculateEndDate(new Date(), duration, durationValue);
     }
 
+    let newStatus = 'active';
+    if (calcedEndDate && new Date() > new Date(calcedEndDate)) {
+      newStatus = 'completed';
+    } else if (frequency === 'ONCE' && startDate && new Date() > new Date(startDate)) {
+      newStatus = 'completed';
+    }
+
     const updatedReminder = await Reminder.findOneAndUpdate(
-      { _id: reminderId },
+      { _id: reminderId, userId: userId },
       {
         medicineName,
         dosage,
@@ -100,8 +116,11 @@ export const updateReminder = async (req, res) => {
         duration,
         durationValue,
         endDate: calcedEndDate,
+        startDate,
         time,
-        type: frequency === 'ONCE' ? 'once' : 'recurring'
+        timezone,
+        type: frequency === 'ONCE' ? 'once' : 'recurring',
+        status: newStatus
       },
       { new: true, runValidators: true }
     );
@@ -173,6 +192,7 @@ export const getMissedReminders = async (req, res) => {
       }
 
       return {
+        reminderId: reminder ? reminder._id : null,
         medicineName: reminder ? reminder.medicineName : 'Unknown',
         scheduledTime: history.scheduledTime,
         timeSinceMissed: timeSinceMissedMs, // in ms
@@ -189,21 +209,75 @@ export const getMissedReminders = async (req, res) => {
 };
 
 export const deleteReminder = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const reminder = await Reminder.findById(id);
+  try { 
+    const { reminderId, userId } = req.params;
+    const reminder = await Reminder.findOne({ _id: reminderId, userId: userId });
 
     if (!reminder) {
       return res.status(404).json({ message: 'Reminder not found' });
     }
 
-    // Cancel the agenda job
+// Cancel the agenda job
     await cancelReminderJobs(reminder._id);
 
     // Remove from DB
     await reminder.deleteOne();
 
     res.status(200).json({ message: 'Reminder deleted' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const takeReminder = async (req, res) => {
+  try {
+    const { reminderId, userId } = req.params;
+    
+    // Find the most recent pending history record for this reminder
+    const history = await ReminderHistory.findOne({
+      reminderId,
+      userId,
+      status: 'scheduled'
+    }).sort({ scheduledTime: -1 });
+
+    if (history) {
+      history.status = 'taken';
+      history.takenTime = new Date();
+      await history.save();
+    }
+
+    // Update the reminder's last_taken string
+    const reminder = await Reminder.findOne({ _id: reminderId, userId });
+    if (reminder) {
+      reminder.last_taken = new Date().toISOString();
+      await reminder.save();
+    }
+
+    res.status(200).json({ message: 'Reminder marked as taken' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const snoozeReminder = async (req, res) => {
+  try {
+    const { reminderId, userId } = req.params;
+    
+    // Validate reminder exists
+    const reminder = await Reminder.findOne({ _id: reminderId, userId });
+    if (!reminder) {
+      return res.status(404).json({ message: 'Reminder not found' });
+    }
+
+    // Schedule a one-off job 10 minutes from now
+    const snoozeTime = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const agenda = req.app.locals.agenda;
+
+    if (agenda) {
+      await agenda.schedule(snoozeTime, 'send-medicine-reminder', { reminderId: reminder._id });
+    }
+
+    res.status(200).json({ message: 'Reminder snoozed for 10 minutes', snoozeTime });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

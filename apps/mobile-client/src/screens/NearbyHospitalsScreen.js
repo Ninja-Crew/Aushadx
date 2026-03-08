@@ -4,7 +4,9 @@ import MapView, { Marker, Callout, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useTheme } from '../context/ThemeContext';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { EXPO_PUBLIC_GOOGLE_MAPS_API_KEY } from '@env';
+import Constants from 'expo-constants';
+
+const GOOGLE_API_KEY = Constants.expoConfig?.extra?.googleMapsApiKey;
 
 // Utility to calculate distance between two coordinates in km
 function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
@@ -26,6 +28,8 @@ function deg2rad(deg) {
 }
 
 const NearbyHospitalsScreen = () => {
+
+  
   const { colors, isDark } = useTheme();
   const [location, setLocation] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -38,13 +42,15 @@ const NearbyHospitalsScreen = () => {
   const [loadingDetails, setLoadingDetails] = useState(false);
 
   const fetchNearbyHospitals = async (lat, lng) => {
+    const mockPlaces = [
+      { id: '1', name: 'City Hospital', lat: lat + 0.01, lng: lng + 0.01, type: 'Hospital' },
+      { id: '2', name: 'Green Valley Clinic', lat: lat - 0.01, lng: lng + 0.005, type: 'Clinic' },
+      { id: '3', name: 'Downtown Pharmacy', lat: lat + 0.005, lng: lng - 0.01, type: 'Pharmacy' },
+    ];
+
     // If no API key provided, show mock data around user
-    if (!EXPO_PUBLIC_GOOGLE_MAPS_API_KEY) {
-      setPlaces([
-        { id: '1', name: 'City Hospital', lat: lat + 0.01, lng: lng + 0.01, type: 'Hospital' },
-        { id: '2', name: 'Green Valley Clinic', lat: lat - 0.01, lng: lng + 0.005, type: 'Clinic' },
-        { id: '3', name: 'Downtown Pharmacy', lat: lat + 0.005, lng: lng - 0.01, type: 'Pharmacy' },
-      ]);
+    if (!GOOGLE_API_KEY) {
+      setPlaces(mockPlaces);
       setLoading(false);
       return;
     }
@@ -52,9 +58,14 @@ const NearbyHospitalsScreen = () => {
     try {
       const radius = 5000; // 5km
       const type = 'hospital';
-      const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius}&type=${type}&key=${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}`;
+      const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius}&type=${type}&key=${GOOGLE_API_KEY}`;
       
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        headers: {
+          'X-Android-Package': 'com.anonymous.mobileclient',
+          'X-Android-Cert': 'C0C186E94304AD89114E874885B0C567DB050892'
+        }
+      });
       const data = await response.json();
       
       if (data.status === 'OK') {
@@ -68,10 +79,15 @@ const NearbyHospitalsScreen = () => {
           user_ratings_total: place.user_ratings_total
         }));
         setPlaces(formattedPlaces);
+      } else {
+        console.warn('Google Places API Error:', data.status, data.error_message);
+        Alert.alert('Google API Error', `${data.status}: ${data.error_message || 'No results found.'}\n\nFalling back to mock data.`);
+        setPlaces(mockPlaces); // Fallback to map testing
       }
     } catch (error) {
-      console.error(error);
-      Alert.alert('Error', 'Could not fetch nearby hospitals.');
+      console.error('Fetch Nearby Hospitals Error:', error);
+      Alert.alert('Error', 'Could not fetch nearby hospitals. Showing mock data.');
+      setPlaces(mockPlaces);
     } finally {
       setLoading(false);
     }
@@ -81,7 +97,7 @@ const NearbyHospitalsScreen = () => {
     setSelectedPlace(place);
     
     // Setup Mock Details if no API Key
-    if (!EXPO_PUBLIC_GOOGLE_MAPS_API_KEY) {
+    if (!GOOGLE_API_KEY) {
        setPlaceDetails({
          formatted_address: '123 Mock Street, Fake City',
          formatted_phone_number: '555-0123',
@@ -94,8 +110,13 @@ const NearbyHospitalsScreen = () => {
 
     setLoadingDetails(true);
     try {
-       const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${place.id}&fields=name,rating,formatted_phone_number,formatted_address,opening_hours,user_ratings_total&key=${EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}`;
-       const response = await fetch(url);
+       const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${place.id}&fields=name,rating,formatted_phone_number,formatted_address,opening_hours,user_ratings_total&key=${GOOGLE_API_KEY}`;
+       const response = await fetch(url, {
+         headers: {
+           'X-Android-Package': 'com.anonymous.mobileclient',
+           'X-Android-Cert': 'C0C186E94304AD89114E874885B0C567DB050892'
+         }
+       });
        const data = await response.json();
 
        if (data.status === 'OK') {
@@ -207,8 +228,6 @@ const NearbyHospitalsScreen = () => {
               <Marker
                 key={`${place.id}-${isSelected}`}
                 coordinate={{ latitude: place.lat, longitude: place.lng }}
-                title={place.name}
-                description={place.type}
                 pinColor={isSelected ? "blue" : "red"}
                 opacity={1} // Keep at 1 to prevent Android native callout clipping bug
                 zIndex={isSelected ? 10 : 1}
@@ -319,7 +338,7 @@ const NearbyHospitalsScreen = () => {
       )}
 
       {/* Warning if no key */}
-      {!EXPO_PUBLIC_GOOGLE_MAPS_API_KEY && (
+      {!GOOGLE_API_KEY && (
          <View style={styles.mockWarning}>
            <Text style={{ color: '#FF9500', fontSize: 10, textAlign: 'center' }}>* Displaying mock data (Missing Google API Key)</Text>
          </View>

@@ -43,4 +43,24 @@ export async function deleteProfile(req, res) {
   }
 }
 
-export default { getProfile, getMedicalInfo, updateProfile, deleteProfile };
+export async function updateFcmToken(req, res) {
+  try {
+    const userId = req.params.user_id || req.user.sub;
+    const { token, action } = req.body; // action: 'add' or 'remove'
+    
+    if (!token) return error(res, "FCM Token is required", 400);
+
+    let updated;
+    if (action === 'remove') {
+      updated = await profileService.removeFcmToken(userId, token);
+    } else {
+      updated = await profileService.addFcmToken(userId, token);
+    }
+
+    return success(res, { fcmTokens: updated ? updated.fcmTokens : [] });
+  } catch (err) {
+    return error(res, "Failed to update FCM token", 500, err.message);
+  }
+}
+
+export default { getProfile, getMedicalInfo, updateProfile, deleteProfile, updateFcmToken };

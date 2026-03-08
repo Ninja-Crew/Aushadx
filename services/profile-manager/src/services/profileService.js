@@ -35,4 +35,20 @@ export async function deleteProfile(userId) {
   return User.findByIdAndDelete(userId);
 }
 
-export default { getProfile, getMedicalInfo, updateProfile, deleteProfile };
+export async function addFcmToken(userId, token) {
+  return User.findByIdAndUpdate(
+    userId,
+    { $addToSet: { fcmTokens: token } },
+    { new: true }
+  ).select("fcmTokens");
+}
+
+export async function removeFcmToken(userId, token) {
+  return User.findByIdAndUpdate(
+    userId,
+    { $pull: { fcmTokens: token } },
+    { new: true }
+  ).select("fcmTokens");
+}
+
+export default { getProfile, getMedicalInfo, updateProfile, deleteProfile, addFcmToken, removeFcmToken };

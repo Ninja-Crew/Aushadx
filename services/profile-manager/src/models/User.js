@@ -46,6 +46,8 @@ const userSchema = new Schema(
       medical_history: { type: [String], default: [] },
     },
 
+    fcmTokens: { type: [String], default: [] },
+
     // Meta
     roles: { type: [String], default: ["user"] },
     is_active: { type: Boolean, default: true },

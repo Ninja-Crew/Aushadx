@@ -47,3 +47,15 @@ export const deleteProfile = async (token) => {
     throw error.response ? error.response.data : error;
   }
 };
+
+export const updateFcmToken = async (token, tokenStr, action = 'add') => {
+  try {
+    const response = await client.patch(`/profile/fcm-token`, { token: tokenStr, action }, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Update FCM Token error:", error);
+    throw error.response ? error.response.data : error;
+  }
+};

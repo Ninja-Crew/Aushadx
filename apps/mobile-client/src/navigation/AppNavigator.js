@@ -14,6 +14,7 @@ import AddEditReminderScreen from '../screens/AddEditReminderScreen';
 import HomeScreen from '../screens/HomeScreen';
 import NearbyHospitalsScreen from '../screens/NearbyHospitalsScreen';
 import CustomHeader from '../components/CustomHeader';
+import NotificationsScreen from '../screens/NotificationsScreen';
 import { useTheme } from '../context/ThemeContext';
 import { navigationRef } from './navigationRef';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -85,6 +86,7 @@ const AppNavigator = () => {
         <Stack.Screen name="Agent" component={AgentScreen} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
         <Stack.Screen name="AddEditReminder" component={AddEditReminderScreen} options={{ title: 'Manage Reminder' }} />
+        <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

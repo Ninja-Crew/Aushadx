@@ -1,19 +1,19 @@
 import axios from 'axios';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import { getToken, getRefreshToken, saveToken, removeToken } from '../utils/storage';
 import { navigate, replace, navigationRef } from '../navigation/navigationRef';
 
-// Use Expo's built-in env var system (requires variables to be prefixed with EXPO_PUBLIC_)
-const BASE_HOST = process.env.EXPO_PUBLIC_BASE_HOST || '127.0.0.1';
-const NETWORK_HOST = process.env.EXPO_PUBLIC_NETWORK_HOST || '192.168.0.107';
-const PORT = process.env.EXPO_PUBLIC_PORT || '30000';
+// Use Expo config for environment variables
+const BASE_URL = Constants.expoConfig?.extra?.baseUrl || 'http://192.168.0.107:30000';
 
 const getBaseUrl = () => {
-  if (Platform.OS === 'android' && BASE_HOST.includes('localhost') || BASE_HOST === '127.0.0.1') {
-    return `http://${NETWORK_HOST}:${PORT}`;
+  if (Platform.OS === 'android' && (BASE_URL.includes('localhost') || BASE_URL.includes('127.0.0.1'))) {
+    // Replace localhost/127.0.0.1 with Android's expected emulator host IP, keeping the rest of the url
+    return BASE_URL.replace('localhost', '10.0.2.2').replace('127.0.0.1', '10.0.2.2');
   }
-  return `http://${BASE_HOST}:${PORT}`;
+  return BASE_URL;
 };
 
 

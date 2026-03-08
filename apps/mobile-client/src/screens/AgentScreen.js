@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, TextInput, TouchableOpacity, Text, FlatList, StyleSheet, Platform, Keyboard, KeyboardAvoidingView } from 'react-native';
+import Constants from 'expo-constants';
 import ChatMessage from '../components/ChatMessage';
 import { useTheme } from '../context/ThemeContext';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -31,12 +32,22 @@ const AgentScreen = ({ route }) => {
   }, []);
 
   useEffect(() => {
-    const BASE_HOST = process.env.EXPO_PUBLIC_BASE_HOST || '127.0.0.1';
-    const NETWORK_HOST = process.env.EXPO_PUBLIC_NETWORK_HOST || '192.168.0.107';
-    const PORT = process.env.EXPO_PUBLIC_PORT || '30000';
+    const BASE_URL = Constants.expoConfig?.extra?.baseUrl || 'http://192.168.0.107:30000';
     
-    const host = Platform.OS === 'android' && (BASE_HOST.includes('localhost') || BASE_HOST === '127.0.0.1') ? NETWORK_HOST : BASE_HOST;
-    const wsUrl = `ws://${host}:${PORT}/ws?token=${token}`;
+    let wsUrlString = BASE_URL;
+    if (Platform.OS === 'android' && (BASE_URL.includes('localhost') || BASE_URL.includes('127.0.0.1'))) {
+      wsUrlString = BASE_URL.replace('localhost', '10.0.2.2').replace('127.0.0.1', '10.0.2.2');
+    }
+    
+    // Convert http/https to ws/wss
+    if (wsUrlString.startsWith('http://')) {
+      wsUrlString = wsUrlString.replace('http://', 'ws://');
+    } else if (wsUrlString.startsWith('https://')) {
+      wsUrlString = wsUrlString.replace('https://', 'wss://');
+    }
+    
+    // Format full websocket route
+    const wsUrl = `${wsUrlString.replace(/\/$/, '')}/ws?token=${token}`;
 
     console.log("Connecting to WS:", wsUrl);
     ws.current = new WebSocket(wsUrl);

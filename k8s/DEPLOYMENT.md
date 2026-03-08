@@ -98,6 +98,7 @@ kubectl get pods -n aushadx -w
 # profile-manager-xxxx                  1/1     Running   0
 # medicine-analyzer-xxxx                1/1     Running   0
 # medicine-scheduler-xxxx               1/1     Running   0
+# medicine-scheduler-worker-xxxx        1/1     Running   0
 # agent-service-xxxx                    1/1     Running   0
 # api-server-xxxx                       1/1     Running   0
 ```
@@ -131,6 +132,7 @@ NETWORK_HOST=10.0.2.2
 # Watch pod logs
 kubectl logs -n aushadx -l app=api-server -f
 kubectl logs -n aushadx -l app=profile-manager -f
+kubectl logs -n aushadx -l app=medicine-scheduler-worker -f
 
 # Describe a crashing pod
 kubectl describe pod -n aushadx <pod-name>
@@ -195,6 +197,7 @@ You can use the official Kubernetes Dashboard to visually monitor and manage pod
 | profile-manager | `profile-manager.aushadx.svc.cluster.local` | 3001 |
 | medicine-analyzer | `medicine-analyzer.aushadx.svc.cluster.local` | 3002 |
 | medicine-scheduler | `medicine-scheduler.aushadx.svc.cluster.local` | 3003 |
+| medicine-scheduler-worker | *No internal service (Daemon)* | N/A |
 | agent-service | `agent-service.aushadx.svc.cluster.local` | 3004 |
 
 Only `api-server` is reachable from outside the cluster. All other services communicate internally via Kubernetes DNS.
