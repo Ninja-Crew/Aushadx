@@ -1,0 +1,650 @@
+# ============================================================
+# AushadX – Kubernetes Manifests for Minikube
+# Services: mongodb, api-server, profile-manager,
+#            medicine-analyzer, medicine-scheduler, agent-service
+#
+# MongoDB runs as a StatefulSet with a 5 Gi PVC.
+# Inter-service URLs are built using Kubernetes $(VAR_NAME)
+# variable expansion. Change the _HOST / _PORT vars and the
+# composed *_URL values are updated automatically.
+# ============================================================
+
+---
+# ─── Namespace ───────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aushadx
+
+---
+# ─── Service Account (Vertex AI workload identity) ───────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aushadx-agent
+  namespace: aushadx
+
+---
+# ─── Secrets ─────────────────────────────────────────────────
+# Values sourced from all service .env files.
+# ⚠ Rotate keys before deploying to production.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aushadx-secrets
+  namespace: aushadx
+type: Opaque
+stringData:
+  # ── MongoDB ──────────────────────────────────────────────────
+  MONGO_URI: "<YOUR_MONGO_URI>"
+
+  # ── JWT (profile-manager / api-server) ───────────────────────
+  JWT_SECRET: "<YOUR_JWT_SECRET>"
+  JWT_ACCESS_SECRET: "<YOUR_JWT_ACCESS_SECRET>"
+  JWT_REFRESH_SECRET: "<YOUR_JWT_REFRESH_SECRET>"
+
+  # ── LLM provider (medicine-analyzer) ─────────────────────────
+  LLM_PROVIDER: "<YOUR_LLM_PROVIDER>"           # e.g. "gemini" or "openai"
+  LLM_MODEL: "<YOUR_LLM_MODEL>"                 # e.g. "gemini-2.5-pro"
+
+  # ── Google / Gemini (medicine-analyzer + agent-service) ──────
+  GEMINI_API_KEY: "<YOUR_GEMINI_API_KEY>"
+  GEMINI_MODEL: "<YOUR_GEMINI_MODEL>"           # e.g. "gemini-2.5-pro"
+
+  # ── Gemini / Vertex AI provider switch ───────────────────────
+  # Set to "vertexai" to use Google Vertex AI, "genai" for direct API key
+  GEMINI_PROVIDER: "<YOUR_GEMINI_PROVIDER>"     # "vertexai" or "genai"
+
+  # ── Vertex AI (medicine-analyzer + agent-service) ────────────
+  VERTEX_PROJECT: "<YOUR_GCP_PROJECT_ID>"
+  VERTEX_LOCATION: "<YOUR_VERTEX_LOCATION>"     # e.g. "us-central1"
+  # Path inside the container where the Vertex AI service account key is mounted
+  GOOGLE_APPLICATION_CREDENTIALS: "/etc/gcp/service-account.json"
+
+  # ── OpenAI (medicine-analyzer, optional fallback) ────────────
+  OPENAI_API_KEY: "<YOUR_OPENAI_API_KEY>"
+
+  # ── Pinecone (medicine-analyzer) ─────────────────────────────
+  PINECONE_API_KEY: "<YOUR_PINECONE_API_KEY>"
+  PINECONE_INDEX: "<YOUR_PINECONE_INDEX>"
+  PINECONE_INDEX_HOST: "<YOUR_PINECONE_INDEX_HOST>"
+  PINECONE_NAMESPACE: "<YOUR_PINECONE_NAMESPACE>"
+
+  # ── Logging ───────────────────────────────────────────────────
+  LOG_LEVEL: "info"
+
+---
+# ════════════════════════════════════════════════════════════
+# MongoDB – StatefulSet, PVC, Service
+# ════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-pvc
+  namespace: aushadx
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: aushadx
+spec:
+  serviceName: mongodb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+        - name: mongodb
+          image: mongo:7
+          ports:
+            - containerPort: 27017
+          env:
+            - name: MONGO_INITDB_DATABASE
+              value: aushadx
+          volumeMounts:
+            - name: mongodb-data
+              mountPath: /data/db
+          readinessProbe:
+            exec:
+              command:
+                - mongosh
+                - --eval
+                - "db.adminCommand('ping')"
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - mongosh
+                - --eval
+                - "db.adminCommand('ping')"
+            initialDelaySeconds: 30
+            periodSeconds: 15
+      volumes:
+        - name: mongodb-data
+          persistentVolumeClaim:
+            claimName: mongodb-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: aushadx
+spec:
+  clusterIP: None   # Headless – StatefulSet DNS: mongodb.aushadx.svc.cluster.local
+  selector:
+    app: mongodb
+  ports:
+    - port: 27017
+      targetPort: 27017
+
+---
+# ════════════════════════════════════════════════════════════
+# profile-manager (port 3001)
+# ════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: profile-manager
+  namespace: aushadx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: profile-manager
+  template:
+    metadata:
+      labels:
+        app: profile-manager
+    spec:
+      containers:
+        - name: profile-manager
+          image: aushadx/profile-manager:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3001
+          env:
+            - name: PORT
+              value: "3001"
+            - name: NODE_ENV
+              value: "production"
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: MONGO_URI
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: JWT_SECRET
+            - name: JWT_ACCESS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: JWT_ACCESS_SECRET
+            - name: JWT_REFRESH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: JWT_REFRESH_SECRET
+            - name: JWT_ACCESS_EXPIRES_IN
+              value: "15m"
+            - name: JWT_REFRESH_EXPIRES_IN
+              value: "7d"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: profile-manager
+  namespace: aushadx
+spec:
+  type: ClusterIP   # internal only – reachable via DNS inside the cluster
+  selector:
+    app: profile-manager
+  ports:
+    - port: 3001
+      targetPort: 3001
+
+---
+# ════════════════════════════════════════════════════════════
+# medicine-analyzer (port 3002)
+# ════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: medicine-analyzer
+  namespace: aushadx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: medicine-analyzer
+  template:
+    metadata:
+      labels:
+        app: medicine-analyzer
+    spec:
+      serviceAccountName: aushadx-agent   # grants Vertex AI workload identity
+      containers:
+        - name: medicine-analyzer
+          image: aushadx/medicine-analyzer:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3002
+          env:
+            - name: PORT
+              value: "3002"
+            - name: NODE_ENV
+              value: "production"
+            - name: LLM_PROVIDER
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: LLM_PROVIDER
+            - name: LLM_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: LLM_MODEL
+            - name: LOG_LEVEL
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: LOG_LEVEL
+            # ── profile-manager reference ──────────────────
+            - name: PROFILE_SERVICE_HOST
+              value: "profile-manager"
+            - name: PROFILE_SERVICE_PORT
+              value: "3001"
+            - name: PROFILE_SERVICE_URL
+              value: "http://$(PROFILE_SERVICE_HOST):$(PROFILE_SERVICE_PORT)"
+            # ──────────────────────────────────────────────
+            - name: PROPAGATE_AUTH
+              value: "true"
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GEMINI_API_KEY
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: OPENAI_API_KEY
+            - name: PINECONE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: PINECONE_API_KEY
+            - name: PINECONE_INDEX
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: PINECONE_INDEX
+            - name: PINECONE_INDEX_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: PINECONE_INDEX_HOST
+            - name: PINECONE_NAMESPACE
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: PINECONE_NAMESPACE
+            # ── Vertex AI ──────────────────────────────────
+            - name: GEMINI_PROVIDER
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GEMINI_PROVIDER
+            - name: VERTEX_PROJECT
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: VERTEX_PROJECT
+            - name: VERTEX_LOCATION
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: VERTEX_LOCATION
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GOOGLE_APPLICATION_CREDENTIALS
+          volumeMounts:
+            - name: vertex-ai-key-volume
+              mountPath: /etc/gcp
+              readOnly: true
+      volumes:
+        - name: vertex-ai-key-volume
+          secret:
+            secretName: vertex-ai-key   # kubectl create secret generic vertex-ai-key --from-file=service-account.json -n aushadx
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: medicine-analyzer
+  namespace: aushadx
+spec:
+  type: ClusterIP   # internal only – reachable via DNS inside the cluster
+  selector:
+    app: medicine-analyzer
+  ports:
+    - port: 3002
+      targetPort: 3002
+
+---
+# ════════════════════════════════════════════════════════════
+# medicine-scheduler (port 3003)
+# ════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: medicine-scheduler
+  namespace: aushadx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: medicine-scheduler
+  template:
+    metadata:
+      labels:
+        app: medicine-scheduler
+    spec:
+      containers:
+        - name: medicine-scheduler
+          image: aushadx/medicine-scheduler:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3003
+          env:
+            - name: PORT
+              value: "3003"
+            - name: NODE_ENV
+              value: "production"
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: MONGO_URI
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: "/etc/firebase/service-account.json"
+          volumeMounts:
+            - name: firebase-key-volume
+              mountPath: /etc/firebase
+              readOnly: true
+      volumes:
+        - name: firebase-key-volume
+          secret:
+            secretName: firebase-admin-key   # kubectl create secret generic firebase-admin-key --from-file=service-account.json -n aushadx
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: medicine-scheduler
+  namespace: aushadx
+spec:
+  type: ClusterIP   # internal only – reachable via DNS inside the cluster
+  selector:
+    app: medicine-scheduler
+  ports:
+    - port: 3003
+      targetPort: 3003
+
+---
+# ════════════════════════════════════════════════════════════
+# medicine-scheduler-worker (Daemon)
+# ════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: medicine-scheduler-worker
+  namespace: aushadx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: medicine-scheduler-worker
+  template:
+    metadata:
+      labels:
+        app: medicine-scheduler-worker
+    spec:
+      containers:
+        - name: medicine-scheduler-worker
+          image: aushadx/medicine-scheduler:latest
+          imagePullPolicy: IfNotPresent
+          command: ["npm", "run", "worker"]
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: MONGO_URI
+            - name: PROFILE_SERVICE_URL
+              value: "http://profile-manager:3001"
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: "/etc/firebase/service-account.json"
+          volumeMounts:
+            - name: firebase-key-volume
+              mountPath: /etc/firebase
+              readOnly: true
+      volumes:
+        - name: firebase-key-volume
+          secret:
+            secretName: firebase-admin-key
+
+---
+# ════════════════════════════════════════════════════════════
+# agent-service (port 3004, Python)
+# ════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-service
+  namespace: aushadx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent-service
+  template:
+    metadata:
+      labels:
+        app: agent-service
+    spec:
+      serviceAccountName: aushadx-agent   # grants Vertex AI workload identity
+      containers:
+        - name: agent-service
+          image: aushadx/agent-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3004
+          env:
+            - name: PORT
+              value: "3004"
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: MONGO_URI
+            # ── service URLs ────────────────────────────────
+            - name: PROFILE_SERVICE_HOST
+              value: "profile-manager"
+            - name: PROFILE_SERVICE_PORT
+              value: "3001"
+            - name: PROFILE_SERVICE_URL
+              value: "http://$(PROFILE_SERVICE_HOST):$(PROFILE_SERVICE_PORT)"
+            - name: PROFILE_MANAGER_URL
+              value: "http://$(PROFILE_SERVICE_HOST):$(PROFILE_SERVICE_PORT)"
+            - name: MEDICINE_ANALYZER_HOST
+              value: "medicine-analyzer"
+            - name: MEDICINE_ANALYZER_PORT
+              value: "3002"
+            - name: MEDICINE_ANALYZER_URL
+              value: "http://$(MEDICINE_ANALYZER_HOST):$(MEDICINE_ANALYZER_PORT)"
+            - name: MEDICINE_SCHEDULER_HOST
+              value: "medicine-scheduler"
+            - name: MEDICINE_SCHEDULER_PORT
+              value: "3003"
+            - name: MEDICINE_SCHEDULER_URL
+              value: "http://$(MEDICINE_SCHEDULER_HOST):$(MEDICINE_SCHEDULER_PORT)"
+            # ── credentials ─────────────────────────────────
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GEMINI_API_KEY
+            - name: GEMINI_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GEMINI_MODEL
+            # ── Vertex AI ──────────────────────────────────
+            - name: GEMINI_PROVIDER
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GEMINI_PROVIDER
+            - name: VERTEX_PROJECT
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: VERTEX_PROJECT
+            - name: VERTEX_LOCATION
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: VERTEX_LOCATION
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GOOGLE_APPLICATION_CREDENTIALS
+          volumeMounts:
+            - name: vertex-ai-key-volume
+              mountPath: /etc/gcp
+              readOnly: true
+      volumes:
+        - name: vertex-ai-key-volume
+          secret:
+            secretName: vertex-ai-key   # kubectl create secret generic vertex-ai-key --from-file=service-account.json -n aushadx
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-service
+  namespace: aushadx
+spec:
+  type: ClusterIP   # internal only – reachable via DNS inside the cluster
+  selector:
+    app: agent-service
+  ports:
+    - port: 3004
+      targetPort: 3004
+
+---
+# ════════════════════════════════════════════════════════════
+# api-server / API Gateway (port 3000) – NodePort for external access
+# ════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-server
+  namespace: aushadx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-server
+  template:
+    metadata:
+      labels:
+        app: api-server
+    spec:
+      containers:
+        - name: api-server
+          image: aushadx/api-server:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: NODE_ENV
+              value: "production"
+            # ── profile-manager ────────────────────────────
+            - name: PROFILE_SERVICE_HOST
+              value: "profile-manager"
+            - name: PROFILE_SERVICE_PORT
+              value: "3001"
+            - name: PROFILE_SERVICE_URL
+              value: "http://$(PROFILE_SERVICE_HOST):$(PROFILE_SERVICE_PORT)"
+            - name: JWKS_URI
+              value: "http://$(PROFILE_SERVICE_HOST):$(PROFILE_SERVICE_PORT)/.well-known/jwks.json"
+            # ── medicine-scheduler ─────────────────────────
+            - name: MEDICINE_SCHEDULER_HOST
+              value: "medicine-scheduler"
+            - name: MEDICINE_SCHEDULER_PORT
+              value: "3003"
+            - name: MEDICINE_SCHEDULER_URL
+              value: "http://$(MEDICINE_SCHEDULER_HOST):$(MEDICINE_SCHEDULER_PORT)"
+            # ── medicine-analyzer ──────────────────────────
+            - name: MEDICINE_ANALYZER_HOST
+              value: "medicine-analyzer"
+            - name: MEDICINE_ANALYZER_PORT
+              value: "3002"
+            - name: MEDICINE_ANALYZER_URL
+              value: "http://$(MEDICINE_ANALYZER_HOST):$(MEDICINE_ANALYZER_PORT)"
+            # ── agent-service (WebSocket) ──────────────────
+            - name: AGENT_SERVICE_HOST
+              value: "agent-service"
+            - name: AGENT_SERVICE_PORT
+              value: "3004"
+            - name: AGENT_SERVICE_URL
+              value: "ws://$(AGENT_SERVICE_HOST):$(AGENT_SERVICE_PORT)"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-server
+  namespace: aushadx
+spec:
+  type: NodePort
+  selector:
+    app: api-server
+  ports:
+    - port: 3000
+      targetPort: 3000
+      nodePort: 30000   # Access via: $(minikube ip):30000

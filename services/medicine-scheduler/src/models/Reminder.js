@@ -23,6 +23,7 @@ const reminderSchema = new mongoose.Schema({
     type: String,
     enum: [
       'ONCE',
+      'DAILY',
       'X_TIMES_DAILY',
       'EVERY_X_HOURS',
       'EVERY_X_MINUTES',
@@ -47,6 +48,7 @@ const reminderSchema = new mongoose.Schema({
   duration: {
     type: String,
     enum: [
+      'SINGLE_DAY',
       'FOR_X_DAYS',
       'FOR_X_WEEKS',
       'FOR_X_MONTHS',
@@ -73,6 +75,10 @@ const reminderSchema = new mongoose.Schema({
   },
   cron: {
     type: String, // Keep for internal use if needed, or derived
+  },
+  timezone: {
+    type: String,
+    default: 'UTC', // Default to UTC if not provided
   },
   status: {
     type: String,

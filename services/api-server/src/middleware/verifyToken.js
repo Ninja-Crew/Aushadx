@@ -37,6 +37,9 @@ export const verifyJWT = (token) => {
       if (err) {
         return reject(err);
       }
+      if (decoded.type !== "access") {
+        return reject(new Error("Invalid token type"));
+      }
       resolve(decoded);
     });
   });

@@ -49,3 +49,27 @@ export const deleteReminder = async (token, id) => {
         throw error.response ? error.response.data : error;
     }
 }
+
+export const takeReminder = async (token, id) => {
+    try {
+        const response = await client.post(`/reminders/${id}/take`, {}, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        return response.data;
+    } catch (error) {
+        console.error("Take Reminder error:", error);
+        throw error.response ? error.response.data : error;
+    }
+}
+
+export const snoozeReminder = async (token, id) => {
+    try {
+        const response = await client.post(`/reminders/${id}/snooze`, {}, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        return response.data;
+    } catch (error) {
+        console.error("Snooze Reminder error:", error);
+        throw error.response ? error.response.data : error;
+    }
+}

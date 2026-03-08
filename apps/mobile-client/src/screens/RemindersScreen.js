@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { getReminders } from '../api/reminders';
-import { colors, spacing, typography } from '../styles/theme';
+import { spacing } from '../styles/theme';
+import { useTheme } from '../context/ThemeContext';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const RemindersScreen = ({ route, navigation }) => {
   const { token } = route.params || {};
+  const { colors } = useTheme();
   const [reminders, setReminders] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -30,6 +32,7 @@ const RemindersScreen = ({ route, navigation }) => {
     }
   };
 
+  const styles = makeStyles(colors);
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       {loading ? (
@@ -89,90 +92,35 @@ const RemindersScreen = ({ route, navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    padding: spacing.m,
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: spacing.s,
-    color: colors.textSecondary,
-    ...typography.caption,
-  },
-  emptyText: {
-    marginTop: spacing.m,
-    color: colors.textSecondary,
-    ...typography.body,
-  },
+const makeStyles = (colors) => StyleSheet.create({
+  container: { padding: spacing.m, flex: 1, backgroundColor: colors.background },
+  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: spacing.s, color: colors.textSecondary, fontSize: 14 },
+  emptyText: { marginTop: spacing.m, color: colors.textSecondary, fontSize: 16 },
   card: {
     backgroundColor: colors.card,
-    borderRadius: 12,
-    padding: spacing.l,
-    marginBottom: spacing.m,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: colors.border + '40'
+    borderRadius: 12, padding: spacing.l, marginBottom: spacing.m,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
+    borderWidth: 1, borderColor: colors.border + '40'
   },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.xs,
-  },
-  medicineName: {
-    ...typography.subheader,
-    color: colors.primary,
-    flex: 1,
-  },
-  dosage: {
-    ...typography.body,
-    marginBottom: spacing.m,
-  },
-  detailsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: spacing.xs,
-  },
-  detailsText: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    marginLeft: spacing.xs,
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.s },
+  medicineName: { fontSize: 18, fontWeight: '600', color: colors.primary, flex: 1 },
+  dosage: { fontSize: 16, color: colors.text, marginBottom: spacing.m },
+  detailsRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.s },
+  detailsText: { fontSize: 14, color: colors.textSecondary, marginLeft: 6 },
+  statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
   statusActive: { backgroundColor: colors.success + '20' },
   statusInactive: { backgroundColor: colors.border },
   statusText: { fontSize: 12, fontWeight: 'bold' },
   statusTextActive: { color: colors.success },
   statusTextInactive: { color: colors.textSecondary },
   fab: {
-    position: 'absolute',
-    bottom: spacing.xl,
-    right: spacing.xl,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 8,
+    position: 'absolute', bottom: spacing.xl, right: spacing.xl,
+    width: 60, height: 60, borderRadius: 30, backgroundColor: colors.primary,
+    justifyContent: 'center', alignItems: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 6, elevation: 8,
   }
 });
 

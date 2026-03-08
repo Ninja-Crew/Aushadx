@@ -10,10 +10,17 @@ export const env = {
   PROPAGATE_AUTH: process.env.PROPAGATE_AUTH === "true" || false,
   LOG_LEVEL: process.env.LOG_LEVEL || "info",
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || "",
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
+  LLM_PROVIDER: process.env.LLM_PROVIDER || "gemini",
+  LLM_MODEL: process.env.LLM_MODEL || "",
   PINECONE_API_KEY: process.env.PINECONE_API_KEY || "",
   PINECONE_INDEX: process.env.PINECONE_INDEX || "",
   PINECONE_INDEX_HOST: process.env.PINECONE_INDEX_HOST || "", 
   PINECONE_NAMESPACE: process.env.PINECONE_NAMESPACE || "",
+  GEMINI_PROVIDER: process.env.GEMINI_PROVIDER || "",
+  VERTEX_PROJECT: process.env.VERTEX_PROJECT || "",
+  VERTEX_LOCATION: process.env.VERTEX_LOCATION || "",
+  GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS || "",
 };
 
 

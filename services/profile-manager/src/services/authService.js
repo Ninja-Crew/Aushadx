@@ -6,7 +6,16 @@ export async function registerUser({ email, password, name }) {
   const existing = await User.findOne({ email });
   if (existing) throw new Error("User already exists");
   const hashed = await hashPassword(password);
-  const user = await User.create({ email, password: hashed, name });
+  const user = await User.create({ 
+    email, 
+    password: hashed, 
+    name,
+    medicalInfo: {
+      bloodType: "unknown",
+      allergies: [],
+      medical_history: []
+    }
+  });
   return user;
 }
 

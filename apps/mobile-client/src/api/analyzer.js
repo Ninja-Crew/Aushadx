@@ -8,7 +8,16 @@ export const analyzeMedicine = async (token, data) => {
     });
     return response.data;
   } catch (error) {
-    console.error("Analyze Medicine error:", error);
-    throw error.response ? error.response.data : error;
+    const status = error.response?.status;
+    const serverError = error.response?.data
+      ? { ...error.response.data, status }   // merge HTTP status into server payload
+      : error;
+
+    if (serverError?.error === 'NOT_MEDICINE_LABEL') {
+      console.log('Log: invalid medicine label image');
+    } else {
+      console.error('Analyze Medicine error:', error);
+    }
+    throw serverError;
   }
 };

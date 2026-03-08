@@ -1,9 +1,10 @@
 import express from 'express';
-import { createReminder, getReminders, deleteReminder, getMissedReminders } from '../controllers/reminderController.js';
+import { createReminder, getReminders, deleteReminder, getMissedReminders, updateReminder, takeReminder, snoozeReminder } from '../controllers/reminderController.js';
 
 const router = express.Router();
 
-router.post('/', createReminder);
+router.post('/:userId', createReminder);
+router.put('/:reminderId/:userId', updateReminder);
 router.get('/missed/:userId', getMissedReminders); // Important: Place before /:userId to avoid conflict if logic wasn't specific, but here it's fine. 
 // Actually, /:userId matches anything. So if I have /:userId, it might match 'missed' if :userId is a string. 
 // Better standard: /users/:userId/reminders/missed or /reminders/missed?userId=...
@@ -13,6 +14,8 @@ router.get('/missed/:userId', getMissedReminders); // Important: Place before /:
 // I should put this BEFORE /:userId
 router.get('/missed/:userId', getMissedReminders);
 router.get('/:userId', getReminders);
-router.delete('/:id', deleteReminder);
+router.post('/:reminderId/take/:userId', takeReminder);
+router.post('/:reminderId/snooze/:userId', snoozeReminder);
+router.delete('/:reminderId/:userId', deleteReminder);
 
 export default router;

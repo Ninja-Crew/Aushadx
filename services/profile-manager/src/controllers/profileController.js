@@ -15,9 +15,9 @@ export async function getProfile(req, res) {
 export async function getMedicalInfo(req, res) {
   try {
     const userId = req.params.user_id || req.user.sub;
-    const medicalInfo = await profileService.getMedicalInfo(userId);
-    if (!medicalInfo) return error(res, "Profile not found", 404);
-    return success(res, { medical_info: medicalInfo });
+    const profile = await profileService.getMedicalInfo(userId);
+    if (!profile) return error(res, "Profile not found", 404);
+    return success(res, { profile });
   } catch (err) {
     return error(res, "Failed to get medical info", 500, err.message);
   }
@@ -43,4 +43,24 @@ export async function deleteProfile(req, res) {
   }
 }
 
-export default { getProfile, getMedicalInfo, updateProfile, deleteProfile };
+export async function updateFcmToken(req, res) {
+  try {
+    const userId = req.params.user_id || req.user.sub;
+    const { token, action } = req.body; // action: 'add' or 'remove'
+    
+    if (!token) return error(res, "FCM Token is required", 400);
+
+    let updated;
+    if (action === 'remove') {
+      updated = await profileService.removeFcmToken(userId, token);
+    } else {
+      updated = await profileService.addFcmToken(userId, token);
+    }
+
+    return success(res, { fcmTokens: updated ? updated.fcmTokens : [] });
+  } catch (err) {
+    return error(res, "Failed to update FCM token", 500, err.message);
+  }
+}
+
+export default { getProfile, getMedicalInfo, updateProfile, deleteProfile, updateFcmToken };
