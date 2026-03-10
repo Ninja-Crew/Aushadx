@@ -65,7 +65,10 @@ client.interceptors.response.use(
     const status = error.response?.status;
     const isAuthError = status === 401 || status === 403;
 
-    if (isAuthError && !originalRequest._retry) {
+    // Do not attempt to refresh token if the error is from login or register
+    const isAuthEndpoint = originalRequest.url?.includes('/auth/login') || originalRequest.url?.includes('/auth/register');
+
+    if (isAuthError && !originalRequest._retry && !isAuthEndpoint) {
       // If a refresh is already in-flight, queue this request
       if (isRefreshing) {
         return new Promise((resolve, reject) => {

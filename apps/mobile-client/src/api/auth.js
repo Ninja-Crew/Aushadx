@@ -6,8 +6,9 @@ export const login = async (email, password) => {
     const response = await client.post('/auth/login', { email, password });
     return response.data.data;
   } catch (error) {
-    console.error("Login error:", error);
-    throw error.response ? error.response.data : error;
+    console.error("Login error:", error?.response?.data || error);
+    const msg = error.response?.data?.error?.message || error.response?.data?.message || error.message;
+    throw new Error(msg);
   }
 };
 
@@ -16,8 +17,9 @@ export const register = async (userData) => {
     const response = await client.post('/auth/signup', userData);
     return response.data.data;
   } catch (error) {
-    console.error("Register error:", error);
-    throw error.response ? error.response.data : error;
+    console.error("Register error:", error?.response?.data || error);
+    const msg = error.response?.data?.error?.message || error.response?.data?.message || error.message;
+    throw new Error(msg);
   }
 };
 

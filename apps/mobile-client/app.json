@@ -14,6 +14,7 @@
     },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.aushadx.mobileclient",
       "config": {
         "googleMapsApiKey": "AIzaSyD8HCvRVMc3G_9fdrN6u636rVRLE2rHdnE"
       }
@@ -25,7 +26,7 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.anonymous.mobileclient",
+      "package": "com.aushadx.mobileclient",
       "permissions": [
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.VIBRATE",
@@ -37,10 +38,6 @@
         "googleMaps": {
           "apiKey": "AIzaSyD8HCvRVMc3G_9fdrN6u636rVRLE2rHdnE"
         }
-      },
-      "notification": {
-        "icon": "./assets/adaptive-icon.png",
-        "color": "#245173"
       }
     },
     "web": {
@@ -51,7 +48,8 @@
       "expo-secure-store",
       "@react-native-firebase/app",
       "@react-native-firebase/messaging",
-      "./plugins/withNotifee"
+      "./plugins/withNotifee",
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "googleMapsApiKey": "AIzaSyD8HCvRVMc3G_9fdrN6u636rVRLE2rHdnE",
