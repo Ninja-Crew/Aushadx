@@ -39,7 +39,7 @@ const CustomHeader = ({ title, navigation, token }) => {
                  <MaterialIcons name="history" size={24} color={colors.text} />
              </TouchableOpacity>
           )}
-          <TouchableOpacity style={[styles.headerIcon, { position: 'relative' }]} onPress={() => navigation.navigate('Notifications', { token })}>
+          <TouchableOpacity style={[styles.headerIcon, { position: 'relative' }]} onPress={() => navigation.navigate('Reminders', { token })}>
             <MaterialIcons name="notifications" size={24} color={colors.text} />
             {unreadCount > 0 && (
                <View style={styles.badge}>

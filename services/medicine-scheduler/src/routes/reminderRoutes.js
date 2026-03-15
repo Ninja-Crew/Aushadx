@@ -1,7 +1,9 @@
 import express from 'express';
-import { createReminder, getReminders, deleteReminder, getMissedReminders, updateReminder, takeReminder, snoozeReminder } from '../controllers/reminderController.js';
+import { createReminder, getReminders, deleteReminder, getMissedReminders, updateReminder, takeReminder, snoozeReminder, getPendingCount, clearAllMissedReminders, deleteAllUserReminders } from '../controllers/reminderController.js';
 
 const router = express.Router();
+
+router.get('/pending/count/:userId', getPendingCount);
 
 router.post('/:userId', createReminder);
 router.put('/:reminderId/:userId', updateReminder);
@@ -12,10 +14,12 @@ router.get('/missed/:userId', getMissedReminders); // Important: Place before /:
 // if I do router.get('/missed/:userId'...) it will conflict with router.get('/:userId'...).
 // 'missed' will be interpreted as a userId.
 // I should put this BEFORE /:userId
+router.post('/missed/clear/:userId', clearAllMissedReminders);
 router.get('/missed/:userId', getMissedReminders);
 router.get('/:userId', getReminders);
 router.post('/:reminderId/take/:userId', takeReminder);
 router.post('/:reminderId/snooze/:userId', snoozeReminder);
+router.delete('/user/:userId', deleteAllUserReminders);
 router.delete('/:reminderId/:userId', deleteReminder);
 
 export default router;

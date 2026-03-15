@@ -22,8 +22,8 @@
     "android": {
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/adaptive-icon-foreground.png",
+        "backgroundColor": "#245173"
       },
       "edgeToEdgeEnabled": true,
       "package": "com.aushadx.mobileclient",
@@ -46,10 +46,18 @@
     "plugins": [
       "expo-font",
       "expo-secure-store",
+      "expo-system-ui",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png"
+        }
+      ],
       "@react-native-firebase/app",
       "@react-native-firebase/messaging",
       "./plugins/withNotifee",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-sqlite"
     ],
     "extra": {
       "googleMapsApiKey": "AIzaSyD8HCvRVMc3G_9fdrN6u636rVRLE2rHdnE",

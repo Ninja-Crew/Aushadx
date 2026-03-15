@@ -5,22 +5,20 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 import LoginScreen from '../screens/LoginScreen';
-import DashboardScreen from '../screens/DashboardScreen';
+import ScheduleScreen from '../screens/ScheduleScreen';
 import RemindersScreen from '../screens/RemindersScreen';
-import AnalyzerScreen from '../screens/AnalyzerScreen';
 import AgentScreen from '../screens/AgentScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import AddEditReminderScreen from '../screens/AddEditReminderScreen';
 import HomeScreen from '../screens/HomeScreen';
 import NearbyHospitalsScreen from '../screens/NearbyHospitalsScreen';
 import CustomHeader from '../components/CustomHeader';
-import NotificationsScreen from '../screens/NotificationsScreen';
 import { useTheme } from '../context/ThemeContext';
 import { navigationRef } from './navigationRef';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getRefreshToken, saveToken } from '../utils/storage';
 import { refreshTokenCall } from '../api/auth';
-import { getProfile } from '../api/profile';
+import { getProfile, registerFCMToken } from '../api/profile';
 import BootSplash from '../components/BootSplash';
 
 const Stack = createStackNavigator();
@@ -64,17 +62,20 @@ const MainTabNavigator = ({ route }) => {
     >
       <Tab.Screen name="HomeTab" component={HomeScreen} options={{ title: 'Home' }} initialParams={params} />
       <Tab.Screen name="DoctorTab" component={NearbyHospitalsScreen} options={{ title: 'Doctor C...' }} initialParams={params} />
-      <Tab.Screen name="ScheduleTab" component={RemindersScreen} options={{ title: 'Schedule' }} initialParams={params} />
+      <Tab.Screen name="ScheduleTab" component={ScheduleScreen} options={{ title: 'Schedule' }} initialParams={params} />
       <Tab.Screen name="AIChatTab" component={AgentScreen} options={{ title: 'AIChat' }} initialParams={params} />
     </Tab.Navigator>
   );
 };
+
+import { useNotificationContext } from '../context/NotificationContext';
 
 const AppNavigator = () => {
   const { colors } = useTheme();
   const [isBootstrapping, setIsBootstrapping] = React.useState(true);
   const initialRoute = useRef('Login');
   const initialParams = useRef(undefined);
+  const { refreshNotifications } = useNotificationContext();
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -88,6 +89,12 @@ const AppNavigator = () => {
             const newRefresh = data?.tokens?.refresh;
             if (newAccess) {
               await saveToken(newAccess, newRefresh || storedRefresh);
+              
+              // Register Push Token on successful boot/refresh
+              registerFCMToken(newAccess).catch(err => 
+                console.warn('[AppNavigator] Soft-failure registering FCM:', err.message)
+              );
+
               // Fetch the user profile immediately so screens have the name
               let user = data?.user;
               try {
@@ -123,7 +130,12 @@ const AppNavigator = () => {
   };
 
   return (
-    <NavigationContainer ref={navigationRef}>
+    <NavigationContainer 
+      ref={navigationRef}
+      onStateChange={() => {
+        refreshNotifications?.();
+      }}
+    >
       <Stack.Navigator
         initialRouteName={initialRoute.current}
         screenOptions={headerStyle}
@@ -132,13 +144,11 @@ const AppNavigator = () => {
         {/* initialParams are passed when navigating from bootstrap */}
         <Stack.Screen name="MainTabs" component={MainTabNavigator} options={{ headerShown: false }} initialParams={initialParams.current} />
 
-        <Stack.Screen name="Dashboard" component={DashboardScreen} options={{ headerShown: false }} />
-        <Stack.Screen name="Reminders" component={RemindersScreen} />
-        <Stack.Screen name="Analyzer" component={AnalyzerScreen} />
+        <Stack.Screen name="Reminders" component={RemindersScreen} options={{ title: 'Reminders' }} />
         <Stack.Screen name="Agent" component={AgentScreen} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
         <Stack.Screen name="AddEditReminder" component={AddEditReminderScreen} options={{ title: 'Manage Reminder' }} />
-        <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notifications' }} />
+        <Stack.Screen name="Schedule" component={ScheduleScreen} options={{ title: 'Schedule' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

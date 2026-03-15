@@ -15,6 +15,7 @@ import { login, register } from '../api/auth';
 import { spacing } from '../styles/theme';
 import { saveToken } from '../utils/storage';
 import { useTheme } from '../context/ThemeContext';
+import { registerFCMToken } from '../api/profile';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const LoginScreen = ({ navigation }) => {
@@ -39,6 +40,11 @@ const LoginScreen = ({ navigation }) => {
       if (isLogin) {
         data = await login(email, password);
         await saveToken(data.tokens.access, data.tokens.refresh);
+        
+        // Register Push Token immediately after login
+        registerFCMToken(data.tokens.access).catch(err => 
+          console.warn('[Login] Soft-failure registering FCM:', err.message)
+        );
 
         // Check if a session route was saved before the token expired
         const pendingRouteRaw = await AsyncStorage.getItem('@pendingRoute');

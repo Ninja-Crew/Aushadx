@@ -24,6 +24,7 @@ export const env = {
   MONGO_OPTIONS: process.env.MONGO_OPTIONS_JSON
     ? JSON.parse(process.env.MONGO_OPTIONS_JSON)
     : undefined,
+  MEDICINE_SCHEDULER_URL: process.env.MEDICINE_SCHEDULER_URL || "http://medicine-scheduler:3002",
 };
 
 export function requireEnv(key) {

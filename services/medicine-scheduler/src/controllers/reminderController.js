@@ -1,54 +1,117 @@
-import Reminder from '../models/Reminder.js';
-import ReminderHistory from '../models/ReminderHistory.js';
-import { scheduleReminder, cancelReminderJobs } from '../jobs/scheduler.js';
+import Reminder from "../models/Reminder.js";
+import ReminderHistory from "../models/ReminderHistory.js";
+import agenda, {
+  scheduleReminder,
+  cancelReminderJobs,
+} from "../jobs/scheduler.js";
 
-const calculateEndDate = (startDate, duration, durationValue) => {
-  if (!startDate) startDate = new Date();
-  const end = new Date(startDate);
-  
-  switch (duration) {
-    case 'FOR_X_DAYS':
-      end.setDate(end.getDate() + (durationValue || 0));
-      return end;
-    case 'FOR_X_WEEKS':
-      end.setDate(end.getDate() + (durationValue || 0) * 7);
-      return end;
-    case 'FOR_X_MONTHS':
-      end.setMonth(end.getMonth() + (durationValue || 0));
-      return end;
-    case 'SINGLE_DAY':
-      end.setHours(23, 59, 59, 999);
-      return end;
-    case 'CONTINUOUS':
-      return null;
-    case 'UNTIL_DATE':
-      return null; // Should be provided in request if UNTIL_DATE
-    default:
-      return null;
-  }
+// ---------------------------------------------------------------------------
+// HELPERS
+// ---------------------------------------------------------------------------
+
+/**
+ * Calculates an endDate from the user's submitted startDate + duration.
+ * Always anchors to startDate so the window is relative to when the user
+ * actually wants the course to begin, not when the server processes it.
+ */
+
+const DURATIONS = {
+  FOR_X_DAYS: "FOR_X_DAYS",
+  FOR_X_WEEKS: "FOR_X_WEEKS",
+  FOR_X_MONTHS: "FOR_X_MONTHS",
+  SINGLE_DAY: "SINGLE_DAY",
+  UNTIL_DATE: "UNTIL_DATE",
+  CONTINUOUS: "CONTINUOUS",
 };
+
+const nowUTC = () => new Date(Date.now());
+
+const toUTC = (value) =>
+  new Date(value instanceof Date ? value.getTime() : value);
+
+const addMinutesUTC = (date, minutes) =>
+  new Date(toUTC(date).getTime() + minutes * 60000);
+
+const addDaysUTC = (date, days) => addMinutesUTC(date, days * 24 * 60);
+
+const addWeeksUTC = (date, weeks) => addDaysUTC(date, weeks * 7);
+
+const addMonthsUTC = (date, months) => {
+  const d = toUTC(date);
+  d.setUTCMonth(d.getUTCMonth() + months);
+  return d;
+};
+
+const END_DATE_CALCULATIONS = {
+  FOR_X_DAYS: ({ startDate, durationValue }) => {
+    return addDaysUTC(startDate, Number(durationValue || 0));
+  },
+  FOR_X_WEEKS: ({ startDate, durationValue }) => {
+    return addWeeksUTC(startDate, Number(durationValue || 0));
+  },
+  FOR_X_MONTHS: ({ startDate, durationValue }) => {
+    return addMonthsUTC(startDate, Number(durationValue || 0));
+  },
+  SINGLE_DAY: ({ startDate }) => {
+    return addDaysUTC(startDate, 1);
+  },
+  UNTIL_DATE: ({ untilDate }) => {
+    return toUTC(untilDate);
+  },
+  CONTINUOUS: ({ startDate }) => {
+    return null;
+  },
+};
+const calculateEndDate = ({
+  startDate,
+  duration,
+  durationValue,
+  untilDate,
+}) => {
+  const strategy = END_DATE_CALCULATIONS[duration];
+  if (!strategy) throw new Error(`Unknown duration type: ${duration}`);
+  return strategy({ startDate, durationValue, untilDate });
+};
+
+const resolveStatus = (calcedEndDate) => {
+  const now = nowUTC();
+  if (calcedEndDate && now > toUTC(calcedEndDate)) return "completed";
+  return "active";
+};
+
+// ---------------------------------------------------------------------------
+// CONTROLLERS
+// ---------------------------------------------------------------------------
 
 export const createReminder = async (req, res) => {
   const { userId } = req.params;
   try {
-    const { 
-      medicineName, dosage, 
-      frequency, frequencyValue, specificWeekDays, specificDayOfMonth, specificTimes,
-      duration, durationValue, endDate: requestedEndDate,
+    const {
+      medicineName,
+      dosage,
+      frequency,
+      frequencyValue,
+      specificWeekDays,
+      specificDaysOfMonth,
+      specificTimes,
+      duration,
+      durationValue,
+      endDate: endDate, // only used when duration === 'UNTIL_DATE'
       startDate,
-      time, // Legacy or for ONCE
-      timezone
     } = req.body;
 
-    let calcedEndDate = requestedEndDate;
-    if (duration && duration !== 'UNTIL_DATE' && duration !== 'CONTINUOUS') {
-      calcedEndDate = calculateEndDate(new Date(), duration, durationValue);
-    }
+    if (!DURATIONS[duration])
+      return res.status(400).json({ message: `Invalid duration: ${duration}` });
+    // Calculate endDate anchored to the user's start, not server time
+    const calcedEndDate = calculateEndDate({
+      startDate,
+      duration,
+      durationValue,
+      untilDate: endDate, // passed through as untilDate for UNTIL_DATE case
+    });
 
-    // For ONCE reminders, startDate should match the scheduled time, not default to now
-    const resolvedStartDate = (frequency === 'ONCE' && !startDate && time)
-      ? new Date(time)
-      : startDate;
+    // 3. Status — handle edge case where user books a ONCE reminder in the past
+    const status = resolveStatus(calcedEndDate);
 
     const reminder = new Reminder({
       userId,
@@ -57,25 +120,24 @@ export const createReminder = async (req, res) => {
       frequency,
       frequencyValue,
       specificWeekDays,
-      specificDayOfMonth,
+      specificDaysOfMonth,
       specificTimes,
       duration,
       durationValue,
+      startDate,
       endDate: calcedEndDate,
-      startDate: resolvedStartDate,
-      time,
-      timezone,
-      type: frequency === 'ONCE' ? 'once' : 'recurring'
+      status,
     });
 
     const savedReminder = await reminder.save();
-    
-    // Schedule the job
-    await scheduleReminder(savedReminder);
+
+    if (status === "active") {
+      await scheduleReminder(savedReminder);
+    }
 
     res.status(201).json(savedReminder);
   } catch (error) {
-    console.error(error);
+    console.error("[createReminder]", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -83,64 +145,71 @@ export const createReminder = async (req, res) => {
 export const updateReminder = async (req, res) => {
   const { reminderId, userId } = req.params;
   try {
-    const { 
-      medicineName, dosage, 
-      frequency, frequencyValue, specificWeekDays, specificDayOfMonth, specificTimes,
-      duration, durationValue, endDate: requestedEndDate,
+    const {
+      medicineName,
+      dosage,
+      frequency,
+      frequencyValue,
+      specificWeekDays,
+      specificDaysOfMonth,
+      specificTimes,
+      duration,
+      durationValue,
+      endDate,
       startDate,
-      time,
-      timezone
     } = req.body;
 
     if (!reminderId) {
-      return res.status(400).json({ message: 'Reminder ID is required for update' });
+      return res
+        .status(400)
+        .json({ message: "Reminder ID is required for update" });
     }
 
-    let calcedEndDate = requestedEndDate;
-    if (duration && duration !== 'UNTIL_DATE' && duration !== 'CONTINUOUS') {
-      calcedEndDate = calculateEndDate(new Date(), duration, durationValue);
-    }
+    if (!DURATIONS[duration])
+      return res.status(400).json({ message: `Invalid duration: ${duration}` });
+    const calcedEndDate = calculateEndDate({
+      startDate,
+      duration,
+      durationValue,
+      untilDate: endDate,
+    });
 
-    let newStatus = 'active';
-    if (calcedEndDate && new Date() > new Date(calcedEndDate)) {
-      newStatus = 'completed';
-    } else if (frequency === 'ONCE' && startDate && new Date() > new Date(startDate)) {
-      newStatus = 'completed';
-    }
+    const status = resolveStatus(calcedEndDate);
 
     const updatedReminder = await Reminder.findOneAndUpdate(
-      { _id: reminderId, userId: userId },
+      { _id: reminderId, userId },
       {
         medicineName,
         dosage,
         frequency,
         frequencyValue,
         specificWeekDays,
-        specificDayOfMonth,
+        specificDaysOfMonth,
         specificTimes,
         duration,
         durationValue,
         endDate: calcedEndDate,
         startDate,
-        time,
-        timezone,
-        type: frequency === 'ONCE' ? 'once' : 'recurring',
-        status: newStatus
+        status,
       },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     if (!updatedReminder) {
-      return res.status(404).json({ message: 'Reminder not found or access denied' });
+      return res
+        .status(404)
+        .json({ message: "Reminder not found or access denied" });
     }
-    
-    // Reschedule the job
+
+    // Always cancel existing jobs first, then reschedule only if still active
     await cancelReminderJobs(updatedReminder._id);
-    await scheduleReminder(updatedReminder);
+    if (status === "active") {
+      await scheduleReminder(updatedReminder);
+    }
 
     res.status(200).json(updatedReminder);
   } catch (error) {
-    console.error(error);
+    console.error("[updateReminder]", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -149,15 +218,15 @@ export const getReminders = async (req, res) => {
   try {
     const { userId } = req.params;
     const { page = 1, limit = 10 } = req.query;
-    
     const skip = (page - 1) * limit;
 
-    const reminders = await Reminder.find({ userId })
-      .sort({ time: 1, createdAt: -1 })
-      .skip(parseInt(skip))
-      .limit(parseInt(limit));
-      
-    const total = await Reminder.countDocuments({ userId });
+    const [reminders, total] = await Promise.all([
+      Reminder.find({ userId })
+        .sort({ startDate: 1, createdAt: -1 })
+        .skip(parseInt(skip))
+        .limit(parseInt(limit)),
+      Reminder.countDocuments({ userId }),
+    ]);
 
     res.status(200).json({
       reminders,
@@ -165,9 +234,23 @@ export const getReminders = async (req, res) => {
         total,
         page: parseInt(page),
         limit: parseInt(limit),
-        totalPages: Math.ceil(total / limit)
-      }
+        totalPages: Math.ceil(total / limit),
+      },
     });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const getPendingCount = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const count = await ReminderHistory.countDocuments({
+      userId,
+      status: "scheduled",
+      scheduledTime: { $lt: new Date() },
+    });
+    res.status(200).json({ count });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -176,59 +259,71 @@ export const getReminders = async (req, res) => {
 export const getMissedReminders = async (req, res) => {
   try {
     const { userId } = req.params;
-    
-    // Find histories provided they were scheduled but not taken (and are in the past)
-    // Assuming 'scheduled' means pending.
-    const missedHistories = await ReminderHistory.find({ 
-      userId, 
-      status: 'scheduled',
-      scheduledTime: { $lt: new Date() } 
-    }).populate('reminderId');
+    const { page = 1, limit = 10 } = req.query;
+    const skip = (page - 1) * limit;
 
-    const result = missedHistories.map(history => {
+    const query = {
+      userId,
+      status: { $in: ["scheduled", "missed"] },
+      scheduledTime: { $lt: new Date() },
+    };
+
+    const [missedHistories, total] = await Promise.all([
+      ReminderHistory.find(query)
+        .sort({ status: -1, scheduledTime: -1 })
+        .skip(parseInt(skip))
+        .limit(parseInt(limit))
+        .populate("reminderId"),
+      ReminderHistory.countDocuments(query),
+    ]);
+
+    const now = new Date();
+    const notifications = missedHistories.map((history) => {
       const reminder = history.reminderId;
-      const now = new Date();
       const scheduledTime = new Date(history.scheduledTime);
-      const timeSinceMissedMs = now - scheduledTime;
-      
-      let timeSinceLastTakenMs = null;
-      if (reminder && reminder.last_taken) {
-        timeSinceLastTakenMs = now - new Date(reminder.last_taken);
-      }
 
       return {
-        reminderId: reminder ? reminder._id : null,
-        medicineName: reminder ? reminder.medicineName : 'Unknown',
+        historyId: history._id,
+        reminderId: reminder?._id ?? null,
+        medicineName: reminder?.medicineName ?? "Unknown",
         scheduledTime: history.scheduledTime,
-        timeSinceMissed: timeSinceMissedMs, // in ms
-        timeSinceMissedMinutes: Math.floor(timeSinceMissedMs / 1000 / 60),
-        timeSinceLastTaken: timeSinceLastTakenMs, // in ms
-        timeSinceLastTakenMinutes: timeSinceLastTakenMs ? Math.floor(timeSinceLastTakenMs / 1000 / 60) : null
+        timeSinceMissedMinutes: Math.floor((now - scheduledTime) / 60000),
+        status: history.status,
+        timeSinceLastTakenMinutes: reminder?.last_taken
+          ? Math.floor((now - new Date(reminder.last_taken)) / 60000)
+          : null,
       };
     });
 
-    res.status(200).json(result);
+    res.status(200).json({
+      notifications,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(total / limit),
+        hasMore: page * limit < total,
+      },
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
 export const deleteReminder = async (req, res) => {
-  try { 
+  try {
     const { reminderId, userId } = req.params;
-    const reminder = await Reminder.findOne({ _id: reminderId, userId: userId });
+    const reminder = await Reminder.findOne({ _id: reminderId, userId });
 
     if (!reminder) {
-      return res.status(404).json({ message: 'Reminder not found' });
+      return res.status(404).json({ message: "Reminder not found" });
     }
 
-// Cancel the agenda job
     await cancelReminderJobs(reminder._id);
-
-    // Remove from DB
+    await ReminderHistory.deleteMany({ reminderId: reminder._id });
     await reminder.deleteOne();
 
-    res.status(200).json({ message: 'Reminder deleted' });
+    res.status(200).json({ message: "Reminder deleted" });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -237,28 +332,44 @@ export const deleteReminder = async (req, res) => {
 export const takeReminder = async (req, res) => {
   try {
     const { reminderId, userId } = req.params;
-    
-    // Find the most recent pending history record for this reminder
-    const history = await ReminderHistory.findOne({
-      reminderId,
-      userId,
-      status: 'scheduled'
-    }).sort({ scheduledTime: -1 });
+
+    // Accept an optional scheduledTime from the client so the exact slot is
+    // marked taken rather than always the most recent one (handles edge cases
+    // where two doses are close together).
+    const { scheduledTime } = req.body || {};
+
+    const query = { reminderId, userId, status: "scheduled" };
+    if (scheduledTime) {
+      query.scheduledTime = toUTC(scheduledTime);
+    }
+
+    const history = await ReminderHistory.findOne(query).sort({
+      scheduledTime: 1,
+    });
 
     if (history) {
-      history.status = 'taken';
+      history.status = "taken";
       history.takenTime = new Date();
       await history.save();
     }
 
-    // Update the reminder's last_taken string
     const reminder = await Reminder.findOne({ _id: reminderId, userId });
     if (reminder) {
-      reminder.last_taken = new Date().toISOString();
+      reminder.last_taken = new Date();
       await reminder.save();
     }
 
-    res.status(200).json({ message: 'Reminder marked as taken' });
+    // Taking a dose should stop any pending nag loop for this reminder/slot.
+    const nagCancelQuery = {
+      name: "nag-medicine-reminder",
+      "data.reminderId": reminderId.toString(),
+    };
+    if (scheduledTime) {
+      nagCancelQuery["data.scheduledTime"] = toUTC(scheduledTime).toISOString();
+    }
+    await agenda.cancel(nagCancelQuery);
+
+    res.status(200).json({ message: "Reminder marked as taken" });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -267,22 +378,94 @@ export const takeReminder = async (req, res) => {
 export const snoozeReminder = async (req, res) => {
   try {
     const { reminderId, userId } = req.params;
-    
-    // Validate reminder exists
+    // Snooze action should always re-trigger this reminder in 5 minutes.
+    const snoozeMinutes = 5;
+    const { scheduledTime } = req.body;
+
     const reminder = await Reminder.findOne({ _id: reminderId, userId });
     if (!reminder) {
-      return res.status(404).json({ message: 'Reminder not found' });
+      return res.status(404).json({ message: "Reminder not found" });
     }
 
-    // Schedule a one-off job 10 minutes from now
-    const snoozeTime = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-    const agenda = req.app.locals.agenda;
+    const snoozeTime = addMinutesUTC(nowUTC(), snoozeMinutes);
 
-    if (agenda) {
-      await agenda.schedule(snoozeTime, 'send-medicine-reminder', { reminderId: reminder._id });
+    const nagCancelQuery = {
+      name: "nag-medicine-reminder",
+      "data.reminderId": reminder._id.toString(),
+    };
+    // If client provides the original slot timestamp, cancel only nags tied to that slot.
+    if (scheduledTime) {
+      nagCancelQuery["data.scheduledTime"] = toUTC(scheduledTime).toISOString();
+    }
+    await agenda.cancel(nagCancelQuery);
+
+    // Schedule a fresh main reminder in 5 minutes.
+    await agenda.schedule(snoozeTime, "send-medicine-reminder", {
+      reminderId: reminder._id.toString(),
+      scheduledTime: snoozeTime.toISOString(),
+    });
+
+    res.status(200).json({
+      message: `Reminder snoozed for ${snoozeMinutes} minutes`,
+      snoozeTime,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const clearAllMissedReminders = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // 1. Mark 'missed' status as 'ignored' - preserve 'scheduled' (pending)
+    const missedResult = await ReminderHistory.updateMany(
+      {
+        userId,
+        status: "missed",
+        scheduledTime: { $lt: new Date() },
+      },
+      { $set: { status: "ignored", takenTime: new Date() } },
+    );
+
+    // 2. Handle "unknown" (orphan) reminders - histories where parent reminder is gone
+    // We find all histories for this user and identify those with missing parents
+    const histories = await ReminderHistory.find({
+      userId,
+      status: { $in: ["scheduled", "missed"] },
+    }).populate("reminderId");
+    const orphanIds = histories.filter((h) => !h.reminderId).map((h) => h._id);
+
+    if (orphanIds.length > 0) {
+      await ReminderHistory.deleteMany({ _id: { $in: orphanIds } });
     }
 
-    res.status(200).json({ message: 'Reminder snoozed for 10 minutes', snoozeTime });
+    res.status(200).json({
+      message: "Missed and unknown reminders cleared successfully",
+      missedCount: missedResult.modifiedCount,
+      orphanCount: orphanIds.length,
+    });
+  } catch (error) {
+    console.error("[clearAllMissedReminders]", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const deleteAllUserReminders = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const userReminders = await Reminder.find({ userId }, "_id");
+    await Promise.all(userReminders.map((r) => cancelReminderJobs(r._id)));
+
+    await Promise.all([
+      Reminder.deleteMany({ userId }),
+      ReminderHistory.deleteMany({ userId }),
+    ]);
+
+    res
+      .status(200)
+      .json({ message: "All user reminders and histories deleted" });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

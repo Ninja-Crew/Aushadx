@@ -4,6 +4,7 @@ import morgan from "morgan";
 import dotenv from "dotenv";
 import { createProxyMiddleware } from "http-proxy-middleware";
 import httpProxy from "http-proxy";
+import cors from "cors";
 
 const { createProxyServer } = httpProxy;
 
@@ -39,12 +40,62 @@ const PORT = process.env.PORT || 3001;
 /* ================================
    INTERNAL SERVICE URLS (HTTP)
 ================================ */
-// ... (lines 18-39 unchanged in logic, but let's keep the flow)
+
+const PROFILE_SERVICE_URL = process.env.PROFILE_SERVICE_URL || "http://127.0.0.1:3001";
+const MEDICINE_SCHEDULER_URL = process.env.MEDICINE_SCHEDULER_URL || "http://127.0.0.1:3003";
+const MEDICINE_ANALYZER_URL = process.env.MEDICINE_ANALYZER_URL || "http://127.0.0.1:3002";
+const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL || "ws://127.0.0.1:3004";
+
+/* ================================
+   USER HEADER INJECTION
+================================ */
+
+const injectUserHeader = (proxyReq, req) => {
+  if (req.user) {
+    proxyReq.setHeader("X-User-Id", req.user.sub);
+    // Profile Manager's JWKS might return 'sub' or 'id', adjust based on actual token claim
+    if (req.user.roles) {
+      proxyReq.setHeader("X-User-Roles", JSON.stringify(req.user.roles));
+    }
+  }
+};
+
+const injectUserParam = (req, res, next) => {
+  if (req.user && req.user.sub) {
+    const url = req.url;
+    const qIndex = url.indexOf("?");
+
+    let path;
+    let query;
+
+    if (qIndex >= 0) {
+      path = url.substring(0, qIndex);
+      query = url.substring(qIndex);
+    } else {
+      path = url;
+      query = "";
+    }
+
+    if (path.endsWith("/")) {
+      req.url = path + req.user.sub + query;
+    } else {
+      req.url = path + "/" + req.user.sub + query;
+    }
+  }
+  next();
+};
 
 /* ================================
    GLOBAL MIDDLEWARE
 =============================== */
-// ...
+
+app.use(cors());
+app.use(morgan("combined"));
+app.use(apiLimiter);
+
+app.get("/health", (_req, res) =>
+  res.status(200).json({ status: "ok", role: "gateway" })
+);
 
 /* ================================
    PUBLIC ROUTES
@@ -60,10 +111,6 @@ app.use(
   })
 );
 
-/* ================================
-   USER HEADER INJECTION
-================================ */
-// ...
 
 /* ================================
    PROTECTED REST ROUTES
@@ -225,5 +272,3 @@ export default app;
 // server.listen(PORT, () => {
 //   console.log(`Gateway running on port ${PORT}`);
 // });
-
-

@@ -7,7 +7,7 @@ export default ({ config }) => {
     },
     extra: {
       ...config.extra,
-      googleMapsCert: process.env.GOOGLE_MAPS_CERT || 'C0C186E94304AD89114E874885B0C567DB050892',
+      googleMapsCert: process.env.GOOGLE_MAPS_CERT,
     },
   };
 };
