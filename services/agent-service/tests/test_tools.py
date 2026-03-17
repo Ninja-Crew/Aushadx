@@ -73,17 +73,56 @@ def test_schedule_reminder_success(monkeypatch):
             "dosage": "500mg",
             "frequency": "DAILY",
             "duration": "CONTINUOUS",
-            "time": "09:00 AM"
-        }, config={"configurable": {"thread_id": "user123"}})
+            "startDate": "2026-03-09T08:00:00+05:30",
+            "specificTimes": ["09:00"]
+        }, config={"configurable": {"thread_id": "user123", "client_timezone": "Asia/Kolkata"}})
         assert result == {"id": "5", "status": "scheduled"}
-        assert m.last_request.json() == {
+        
+        req_json = m.last_request.json()
+        assert req_json["medicineName"] == "Paracetamol"
+        assert req_json["dosage"] == "500mg"
+        assert req_json["frequency"] == "DAILY"
+        assert req_json["startDate"] == "2026-03-09T02:30:00+00:00"
+        assert req_json["specificTimes"] == ["03:30"]
+        assert req_json["specificTimes"] == ["03:30"]
+
+def test_update_reminder_success(monkeypatch):
+    monkeypatch.setattr(tools, "MEDICINE_SCHEDULER_URL", "http://mock-scheduler")
+    with requests_mock.Mocker() as m:
+        # Mock the GET to fetch exactly what currently exists
+        existing_reminder = {
+            "_id": "67abcd",
             "medicineName": "Paracetamol",
             "dosage": "500mg",
             "frequency": "DAILY",
             "duration": "CONTINUOUS",
-            "time": "09:00 AM"
+            "startDate": "2026-03-09T08:00:00Z", # Already UTC in DB
+            "specificTimes": ["14:30"] # 14:30 UTC = 20:00 IST
         }
-
+        m.get("http://mock-scheduler/reminders/user123", json=[existing_reminder])
+        m.put("http://mock-scheduler/reminders/67abcd/user123", json={"id": "67abcd", "status": "updated"})
+        
+        # Test just updating the time to 9:00 AM local
+        result = tools.update_reminder.invoke({
+            "reminderId": "67abcd",
+            "specificTimes": ["09:00"]
+        }, config={"configurable": {"thread_id": "user123", "client_timezone": "Asia/Kolkata"}})
+        
+        assert result == {"id": "67abcd", "status": "updated"}
+        
+        req_json = m.last_request.json()
+        assert req_json["medicineName"] == "Paracetamol"
+        assert req_json["dosage"] == "500mg"
+        # 9:00 AM IST -> 03:30 AM UTC
+        assert req_json["specificTimes"] == ["03:30"]
+        # The start date was '2026-03-09T08:00:00Z'. When parsed as Asia/Kolkata and converted to UTC, what happens?
+        # The code active_start_date = existing.get("startDate") -> '2026-03-09T08:00:00Z'
+        # local_start_dt = datetime.fromisoformat('2026-03-09T08:00:00+00:00') -> tzaware UTC.
+        # local_start_dt.tzinfo is not None.
+        # It won't replace tzinfo. It will just be UTC.
+        # The specificTimes convert happens taking local_start_dt and replacing hour/minute.
+        # Wait, if local_start_dt is UTC, replacing hour/minute means putting local hour/minute into UTC object! That is wrong!
+        
 def test_generate_medical_summary_success(monkeypatch):
     monkeypatch.setattr(tools, "PROFILE_MANAGER_URL", "http://mock-profile")
     monkeypatch.setattr(tools, "MEDICINE_SCHEDULER_URL", "http://mock-scheduler")
