@@ -50,9 +50,41 @@ docker build -t aushadx/api-server:latest         ./services/api-server
 
 ---
 
-## 3. Configure secrets / environment variables
+## 3. Create Kubernetes file-based secrets
 
-All secrets are stored in `k8s/aushadx-deployment.yaml` inside the `Secret` block. The file is git-ignored — edit it with your real values before applying:
+Two secrets must be created from local JSON key files **before** applying the manifests.
+
+### 3a. Firebase Admin Key (push notifications)
+
+Used by `medicine-scheduler` and `medicine-scheduler-worker` for Firebase Cloud Messaging.
+
+```bash
+kubectl create secret generic firebase-admin-key \
+  --from-file=service-account.json=/path/to/firebase-service-account.json \
+  -n aushadx
+```
+
+### 3b. Vertex AI / GCP Service Account Key
+
+Used by `medicine-analyzer` and `agent-service` for Google Vertex AI (Gemini).
+
+```bash
+kubectl create secret generic vertex-ai-key \
+  --from-file=service-account.json=/path/to/gcp-service-account.json \
+  -n aushadx
+```
+
+---
+
+## 4. Configure secrets / environment variables
+
+Copy the example file and fill in your values:
+
+```bash
+cp k8s/aushadx-deployment.yaml.example k8s/aushadx-deployment.yaml
+```
+
+Edit the `stringData` block in the `Secret` section:
 
 ```yaml
 stringData:
@@ -64,10 +96,19 @@ stringData:
   JWT_ACCESS_SECRET:  "..."
   JWT_REFRESH_SECRET: "..."
 
+  # LLM provider (medicine-analyzer)
+  LLM_PROVIDER: "gemini"       # or "openai"
+  LLM_MODEL:    "gemini-2.5-pro"
+
   # Gemini / Google
   GEMINI_API_KEY: "AIza..."
-  GOOGLE_API_KEY: "AIza..."   # same key, used by agent-service
-  GEMINI_MODEL:   "gemini-2.5-flash"
+  GEMINI_MODEL:   "gemini-2.5-pro"
+
+  # Vertex AI provider switch
+  GEMINI_PROVIDER: "vertexai"  # "vertexai" or "genai"
+  VERTEX_PROJECT:  "your-gcp-project-id"
+  VERTEX_LOCATION: "us-central1"
+  GOOGLE_APPLICATION_CREDENTIALS: "/etc/gcp/service-account.json"
 
   # OpenAI (optional – only if LLM_PROVIDER=openai)
   OPENAI_API_KEY: "sk-..."
@@ -83,7 +124,7 @@ stringData:
 
 ---
 
-## 4. Apply the manifests
+## 5. Apply the manifests
 
 ```bash
 kubectl apply -f k8s/aushadx-deployment.yaml
@@ -105,7 +146,7 @@ kubectl get pods -n aushadx -w
 
 ---
 
-## 5. Connect the mobile client to the gateway
+## 6. Connect the mobile client to the gateway
 
 The API gateway (`api-server`) is exposed on **NodePort 30000**.
 
@@ -126,13 +167,15 @@ NETWORK_HOST=10.0.2.2
 
 ---
 
-## 6. Useful debugging commands
+## 7. Useful debugging commands
 
 ```bash
 # Watch pod logs
 kubectl logs -n aushadx -l app=api-server -f
 kubectl logs -n aushadx -l app=profile-manager -f
 kubectl logs -n aushadx -l app=medicine-scheduler-worker -f
+kubectl logs -n aushadx -l app=medicine-analyzer -f
+kubectl logs -n aushadx -l app=agent-service -f
 
 # Describe a crashing pod
 kubectl describe pod -n aushadx <pod-name>
@@ -144,13 +187,16 @@ kubectl get svc -n aushadx
 docker build -t aushadx/api-server:latest ./services/api-server
 kubectl rollout restart deployment -n aushadx api-server
 
+# Rolling-restart all deployments at once
+kubectl rollout restart deployment -n aushadx
+
 # Delete everything and start fresh
 kubectl delete namespace aushadx
 ```
 
 ---
 
-## 7. Kubernetes Dashboard
+## 8. Kubernetes Dashboard
 
 You can use the official Kubernetes Dashboard to visually monitor and manage pods, services, and secrets.
 

@@ -1,82 +1,138 @@
-import admin from 'firebase-admin';
-import axios from 'axios';
+import admin from "firebase-admin";
+import axios from "axios";
 
-import fs from 'fs';
-import path from 'path';
+import fs from "fs";
+import path from "path";
 
 // Check for service account file path via env or default to root of service
-const serviceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || path.resolve('./service-account.json');
+const serviceAccountPath =
+  process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+  path.resolve("./service-account.json");
 
 // Initialize Firebase Admin
 if (!admin.apps.length) {
   try {
     if (fs.existsSync(serviceAccountPath)) {
-      const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+      const serviceAccount = JSON.parse(
+        fs.readFileSync(serviceAccountPath, "utf8"),
+      );
       admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
+        credential: admin.credential.cert(serviceAccount),
       });
-      console.log('[PUSH SERVICE] Firebase Admin initialized with service-account.json');
+      console.log(
+        "[PUSH SERVICE] Firebase Admin initialized with service-account.json",
+      );
     } else {
-      console.warn(`[PUSH SERVICE] WARNING: service-account.json not found at ${serviceAccountPath}. Push notifications will fail or mock mode will run if admin is not initialized.`);
+      console.warn(
+        `[PUSH SERVICE] WARNING: service-account.json not found at ${serviceAccountPath}. Push notifications will fail or mock mode will run if admin is not initialized.`,
+      );
       // Fallback to application default just in case it's in a GCP environment
       admin.initializeApp({
-        credential: admin.credential.applicationDefault()
+        credential: admin.credential.applicationDefault(),
       });
     }
   } catch (err) {
-    console.error('[PUSH SERVICE] Firebase Admin init failed:', err.message);
+    console.error("[PUSH SERVICE] Firebase Admin init failed:", err.message);
   }
 }
 
-const PROFILE_SERVICE_URL = process.env.PROFILE_SERVICE_URL || "http://localhost:3001";
+const PROFILE_SERVICE_URL =
+  process.env.PROFILE_SERVICE_URL || "http://localhost:3001";
 
-export const sendPushNotification = async (userId, message, reminderId) => {
+const getNotificationActions = (extraData = {}) => {
+  const status = extraData.status;
+  const type = extraData.notificationType;
+
+  // Missed-dose safety alert should not expose quick actions.
+  if (status === "missed") return [];
+
+  // Nag notifications should allow only marking as taken.
+  if (type === "nag") {
+    return [{ title: "Take", pressAction: { id: "take" } }];
+  }
+
+  // Default scheduled reminder actions.
+  return [
+    { title: "Take", pressAction: { id: "take" } },
+    { title: "Snooze", pressAction: { id: "snooze" } },
+  ];
+};
+
+export const sendPushNotification = async (
+  userId,
+  message,
+  reminderId,
+  extraData = {},
+) => {
   try {
-    console.log(`[PUSH SERVICE] Sending notification to user ${userId}: ${message}`);
-    
+    console.log(
+      `[PUSH SERVICE] Sending notification to user ${userId}: ${message}`,
+    );
+
     // 1. Fetch user's FCM tokens from Profile Manager
     // Since medicine-scheduler doesn't have the JWT token here, it uses an internal service call.
     // Ensure Profile Manager allows this or bypasses auth for internal requests.
-    const response = await axios.get(`${PROFILE_SERVICE_URL}/profile/${userId}?internal=true`);
+    const response = await axios.get(
+      `${PROFILE_SERVICE_URL}/profile/${userId}?internal=true`,
+    );
     const user = response.data.data?.user || response.data.user;
-    
+
     const tokens = user?.fcmTokens || [];
     if (tokens.length === 0) {
       console.log(`[PUSH SERVICE] User ${userId} has no FCM tokens.`);
-      return { success: false, reason: 'No tokens' };
+      return { success: false, reason: "No tokens" };
     }
 
-    // 2. Dispatch FCM Data Messages via Firebase Admin
+    // 2. Dispatch FCM Messages via Firebase Admin
     if (admin.apps.length > 0) {
+      const actions = getNotificationActions(extraData);
       const payload = {
         tokens,
         data: {
-          title: 'Medicine Reminder',
+          title: "Medicine Reminder",
           body: message,
-          reminderId: reminderId ? reminderId.toString() : '',
-          actions: JSON.stringify([
-            { title: 'Take', pressAction: { id: 'take' } },
-            { title: 'Snooze', pressAction: { id: 'snooze' } }
-          ])
-        }
+          reminderId: reminderId ? reminderId.toString() : "",
+          ...(extraData || {}),
+          actions: JSON.stringify(actions),
+        },
+        android: {
+          priority: "high",
+        },
+        apns: {
+          payload: {
+            aps: {
+              contentAvailable: true,
+              sound: "default",
+            },
+          },
+        },
       };
-      
+
       const response = await admin.messaging().sendEachForMulticast(payload);
-      console.log(`[PUSH SERVICE] FCM send responses: ${response.successCount} success, ${response.failureCount} failures`);
-      
+      console.log(
+        `[PUSH SERVICE] FCM send responses: ${response.successCount} success, ${response.failureCount} failures`,
+      );
+
       if (response.failureCount > 0) {
         const failedTokens = [];
         response.responses.forEach((resp, idx) => {
           if (!resp.success) {
             const error = resp.error;
-            console.error(`[PUSH SERVICE] Failure for token ${tokens[idx]}:`, error);
+            console.error(
+              `[PUSH SERVICE] Failure for token ${tokens[idx]}:`,
+              error,
+            );
 
             // Check if the token is invalid or expired
-            if (error && error.errorInfo && [
-              'messaging/invalid-registration-token',
-              'messaging/registration-token-not-registered',
-              'messaging/mismatched-credential'
-            ].includes(error.errorInfo.code)) {
+            if (
+              error &&
+              error.errorInfo &&
+              [
+                "messaging/invalid-registration-token",
+                "messaging/registration-token-not-registered",
+                "messaging/mismatched-credential",
+              ].includes(error.errorInfo.code)
+            ) {
               failedTokens.push(tokens[idx]);
             }
           }
@@ -84,23 +140,33 @@ export const sendPushNotification = async (userId, message, reminderId) => {
 
         // Remove failed invalid tokens from the user's profile
         if (failedTokens.length > 0) {
-           console.log(`[PUSH SERVICE] Removing ${failedTokens.length} dead tokens for user ${userId}`);
-           for (const token of failedTokens) {
-              try {
-                await axios.patch(`${PROFILE_SERVICE_URL}/profile/fcm-token/${userId}?internal=true`, {
-                   token: token,
-                   action: 'remove'
-                });
-              } catch (e) {
-                console.error(`[PUSH SERVICE] Failed to remove dead token ${token} for user ${userId}:`, e.message);
-              }
-           }
+          console.log(
+            `[PUSH SERVICE] Removing ${failedTokens.length} dead tokens for user ${userId}`,
+          );
+          for (const token of failedTokens) {
+            try {
+              await axios.patch(
+                `${PROFILE_SERVICE_URL}/profile/fcm-token/${userId}?internal=true`,
+                {
+                  token: token,
+                  action: "remove",
+                },
+              );
+            } catch (e) {
+              console.error(
+                `[PUSH SERVICE] Failed to remove dead token ${token} for user ${userId}:`,
+                e.message,
+              );
+            }
+          }
         }
       }
 
       return { success: true, timestamp: new Date(), fcmResponse: response };
     } else {
-      console.log(`[PUSH SERVICE] Mock FCM Multicast to ${tokens.length} devices.`);
+      console.log(
+        `[PUSH SERVICE] Mock FCM Multicast to ${tokens.length} devices.`,
+      );
       return { success: true, timestamp: new Date(), mock: true };
     }
   } catch (error) {

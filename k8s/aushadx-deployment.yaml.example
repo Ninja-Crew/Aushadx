@@ -17,6 +17,14 @@ metadata:
   name: aushadx
 
 ---
+# ─── Service Account (Vertex AI workload identity) ───────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aushadx-agent
+  namespace: aushadx
+
+---
 # ─── Secrets ─────────────────────────────────────────────────
 # Values sourced from all service .env files.
 # ⚠ Rotate keys before deploying to production.
@@ -36,12 +44,22 @@ stringData:
   JWT_REFRESH_SECRET: "<YOUR_JWT_REFRESH_SECRET>"
 
   # ── LLM provider (medicine-analyzer) ─────────────────────────
-  LLM_PROVIDER: "<YOUR_LLM_PROVIDER>"
-  LLM_MODEL: "<YOUR_LLM_MODEL>"
+  LLM_PROVIDER: "<YOUR_LLM_PROVIDER>"           # e.g. "gemini" or "openai"
+  LLM_MODEL: "<YOUR_LLM_MODEL>"                 # e.g. "gemini-2.5-pro"
 
   # ── Google / Gemini (medicine-analyzer + agent-service) ──────
   GEMINI_API_KEY: "<YOUR_GEMINI_API_KEY>"
-  GEMINI_MODEL: "<YOUR_GEMINI_MODEL>"                             # agent-service
+  GEMINI_MODEL: "<YOUR_GEMINI_MODEL>"           # e.g. "gemini-2.5-pro"
+
+  # ── Gemini / Vertex AI provider switch ───────────────────────
+  # Set to "vertexai" to use Google Vertex AI, "genai" for direct API key
+  GEMINI_PROVIDER: "<YOUR_GEMINI_PROVIDER>"     # "vertexai" or "genai"
+
+  # ── Vertex AI (medicine-analyzer + agent-service) ────────────
+  VERTEX_PROJECT: "<YOUR_GCP_PROJECT_ID>"
+  VERTEX_LOCATION: "<YOUR_VERTEX_LOCATION>"     # e.g. "us-central1"
+  # Path inside the container where the Vertex AI service account key is mounted
+  GOOGLE_APPLICATION_CREDENTIALS: "/etc/gcp/service-account.json"
 
   # ── OpenAI (medicine-analyzer, optional fallback) ────────────
   OPENAI_API_KEY: "<YOUR_OPENAI_API_KEY>"
@@ -227,6 +245,7 @@ spec:
       labels:
         app: medicine-analyzer
     spec:
+      serviceAccountName: aushadx-agent   # grants Vertex AI workload identity
       containers:
         - name: medicine-analyzer
           image: aushadx/medicine-analyzer:latest
@@ -293,6 +312,35 @@ spec:
                 secretKeyRef:
                   name: aushadx-secrets
                   key: PINECONE_NAMESPACE
+            # ── Vertex AI ──────────────────────────────────
+            - name: GEMINI_PROVIDER
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GEMINI_PROVIDER
+            - name: VERTEX_PROJECT
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: VERTEX_PROJECT
+            - name: VERTEX_LOCATION
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: VERTEX_LOCATION
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GOOGLE_APPLICATION_CREDENTIALS
+          volumeMounts:
+            - name: vertex-ai-key-volume
+              mountPath: /etc/gcp
+              readOnly: true
+      volumes:
+        - name: vertex-ai-key-volume
+          secret:
+            secretName: vertex-ai-key   # kubectl create secret generic vertex-ai-key --from-file=service-account.json -n aushadx
 ---
 apiVersion: v1
 kind: Service
@@ -351,7 +399,7 @@ spec:
       volumes:
         - name: firebase-key-volume
           secret:
-            secretName: firebase-admin-key
+            secretName: firebase-admin-key   # kubectl create secret generic firebase-admin-key --from-file=service-account.json -n aushadx
 ---
 apiVersion: v1
 kind: Service
@@ -430,6 +478,7 @@ spec:
       labels:
         app: agent-service
     spec:
+      serviceAccountName: aushadx-agent   # grants Vertex AI workload identity
       containers:
         - name: agent-service
           image: aushadx/agent-service:latest
@@ -439,12 +488,19 @@ spec:
           env:
             - name: PORT
               value: "3004"
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: MONGO_URI
             # ── service URLs ────────────────────────────────
             - name: PROFILE_SERVICE_HOST
               value: "profile-manager"
             - name: PROFILE_SERVICE_PORT
               value: "3001"
             - name: PROFILE_SERVICE_URL
+              value: "http://$(PROFILE_SERVICE_HOST):$(PROFILE_SERVICE_PORT)"
+            - name: PROFILE_MANAGER_URL
               value: "http://$(PROFILE_SERVICE_HOST):$(PROFILE_SERVICE_PORT)"
             - name: MEDICINE_ANALYZER_HOST
               value: "medicine-analyzer"
@@ -469,6 +525,35 @@ spec:
                 secretKeyRef:
                   name: aushadx-secrets
                   key: GEMINI_MODEL
+            # ── Vertex AI ──────────────────────────────────
+            - name: GEMINI_PROVIDER
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GEMINI_PROVIDER
+            - name: VERTEX_PROJECT
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: VERTEX_PROJECT
+            - name: VERTEX_LOCATION
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: VERTEX_LOCATION
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GOOGLE_APPLICATION_CREDENTIALS
+          volumeMounts:
+            - name: vertex-ai-key-volume
+              mountPath: /etc/gcp
+              readOnly: true
+      volumes:
+        - name: vertex-ai-key-volume
+          secret:
+            secretName: vertex-ai-key   # kubectl create secret generic vertex-ai-key --from-file=service-account.json -n aushadx
 ---
 apiVersion: v1
 kind: Service

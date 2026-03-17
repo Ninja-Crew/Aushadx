@@ -17,12 +17,15 @@ const reminderHistorySchema = new mongoose.Schema({
     required: true,
     index: true, // Useful for querying missed reminders
   },
+  jobId: {
+    type: mongoose.Schema.Types.ObjectId,
+  },
   takenTime: {
     type: Date,
   },
   status: {
     type: String,
-    enum: ['scheduled', 'taken', 'missed', 'skipped'],
+    enum: ['scheduled', 'taken', 'missed', 'skipped', 'ignored'],
     default: 'scheduled',
   },
   createdAt: {

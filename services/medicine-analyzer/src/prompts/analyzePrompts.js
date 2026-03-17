@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const medicineSchema = z.object({
+  is_medicine_label: z.boolean(),
   drug_name: z.string().nullable(),
   indications: z.array(z.string()).default([]),
   recommended_dosage: z.object({
@@ -47,15 +48,17 @@ Follow these rules strictly.
 GENERAL RULES
 ----------------------
 
-1. Use retrieved medical knowledge if it is relevant.
-2. If RAG context is insufficient, rely on general pharmacology knowledge.
-3. Never fabricate unknown facts.
-4. If a value cannot be determined:
+1. First, determine if the provided text looks like it came from a real medicine label, package insert, or pharmaceutical product. Set \`is_medicine_label\` to \`true\` if so, otherwise \`false\`.
+2. If \`is_medicine_label\` is \`false\`, you may return empty/null values for all other fields — do not attempt to extract medicine information from non-medicine text.
+3. Use retrieved medical knowledge if it is relevant.
+4. If RAG context is insufficient, rely on general pharmacology knowledge.
+5. Never fabricate unknown facts.
+6. If a value cannot be determined:
    - Use empty array [] for arrays
    - Use null for nullable fields
    - Use "" for strings if unknown
-5. Numbers must be real numbers (not strings).
-6. Only include references that correspond to provided RAG context indices.
+7. Numbers must be real numbers (not strings).
+8. Only include references that correspond to provided RAG context indices.
 
 ${contextSection}
 
@@ -91,6 +94,8 @@ Return ONLY a valid JSON object.
 The JSON MUST strictly match this structure:
 
 {
+  "is_medicine_label": true | false,
+
   "drug_name": "string",
 
   "indications": ["string"],

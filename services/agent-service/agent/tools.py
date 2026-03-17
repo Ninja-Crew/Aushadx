@@ -20,7 +20,7 @@ class GetUpcomingRemindersInput(BaseModel):
 @tool("get_upcoming_reminders", args_schema=GetUpcomingRemindersInput)
 def get_upcoming_reminders(config: RunnableConfig) -> Dict[str, Any]:
     """Fetches specific scheduled reminders for the user."""
-    user_id = config.get("configurable", {}).get("thread_id")
+    user_id = config.get("configurable", {}).get("user_id") or config.get("configurable", {}).get("thread_id")
     try:
         url = f"{MEDICINE_SCHEDULER_URL}/reminders/{user_id}"
         response = requests.get(url)
@@ -36,7 +36,7 @@ class GetPendingMissedRemindersInput(BaseModel):
 @tool("get_pending_or_missed_reminders", args_schema=GetPendingMissedRemindersInput)
 def get_pending_or_missed_reminders(config: RunnableConfig) -> List[Dict[str, Any]]:
     """Queries the database for any doses the user missed or still needs to take today."""
-    user_id = config.get("configurable", {}).get("thread_id")
+    user_id = config.get("configurable", {}).get("user_id") or config.get("configurable", {}).get("thread_id")
     try:
         url = f"{MEDICINE_SCHEDULER_URL}/reminders/missed/{user_id}"
         response = requests.get(url)
@@ -52,7 +52,7 @@ class AnalyzeMedicineInput(BaseModel):
 @tool("analyze_medicine", args_schema=AnalyzeMedicineInput)
 def analyze_medicine(medicine_name: str, config: RunnableConfig) -> Dict[str, Any]:
     """Takes the medicine name, fetches the profile, and formats potential complications."""
-    user_id = config.get("configurable", {}).get("thread_id")
+    user_id = config.get("configurable", {}).get("user_id") or config.get("configurable", {}).get("thread_id")
     try:
         url = f"{MEDICINE_ANALYZER_URL}/api/analyze/{user_id}"
         payload = {"medicine_data": {"text": medicine_name}}
@@ -94,7 +94,7 @@ class CheckScheduleComplicationsInput(BaseModel):
 @tool("check_schedule_complications", args_schema=CheckScheduleComplicationsInput)
 def check_schedule_complications(config: RunnableConfig) -> Dict[str, Any]:
     """A holistic check of all active reminders for the day to ensure taking them won't cause adverse interactions."""
-    user_id = config.get("configurable", {}).get("thread_id")
+    user_id = config.get("configurable", {}).get("user_id") or config.get("configurable", {}).get("thread_id")
     try:
         url = f"{MEDICINE_SCHEDULER_URL}/reminders/{user_id}"
         response = requests.get(url)
@@ -139,8 +139,23 @@ class ScheduleReminderInput(BaseModel):
     
     durationValue: Optional[int] = Field(description="The numeric value 'X' for FOR_X durations.", default=None)
     
-    time: Optional[str] = Field(description="A single ISO datetime or HH:mm string. Required if frequency is ONCE.", default=None)
-    startDate: Optional[str] = Field(description="ISO string representing when the reminder schedule begins (e.g. 2026-03-08T00:00:00Z).", default=None)
+    time: Optional[str] = Field(
+        description=(
+            "REQUIRED when frequency is ONCE. Must be a full ISO-8601 datetime string including date AND time "
+            "AND timezone offset, e.g. '2026-03-09T08:00:00+05:30'. "
+            "NEVER use a bare HH:mm string like '08:00' — always include the full date. "
+            "Call get_current_datetime first to get today's date, then combine it with the user's requested time."
+        ),
+        default=None
+    )
+    startDate: Optional[str] = Field(
+        description=(
+            "ISO-8601 datetime string for when a RECURRING reminder schedule begins, e.g. '2026-03-09T00:00:00+05:30'. "
+            "OMIT THIS FIELD for ONCE frequency — the `time` field already carries the full target datetime. "
+            "Only set startDate for recurring frequencies like DAILY, EVERY_X_HOURS, etc."
+        ),
+        default=None
+    )
 
 @tool("schedule_reminder", args_schema=ScheduleReminderInput)
 def schedule_reminder(
@@ -157,7 +172,7 @@ def schedule_reminder(
     startDate: Optional[str] = None
 ) -> Dict[str, Any]:
     """Writes a new reminder to the database."""
-    user_id = config.get("configurable", {}).get("thread_id")
+    user_id = config.get("configurable", {}).get("user_id") or config.get("configurable", {}).get("thread_id")
     try:
         url = f"{MEDICINE_SCHEDULER_URL}/reminders/{user_id}"
         payload = {
@@ -187,7 +202,7 @@ class GenerateMedicalSummaryInput(BaseModel):
 @tool("generate_medical_summary", args_schema=GenerateMedicalSummaryInput)
 def generate_medical_summary(config: RunnableConfig) -> Dict[str, Any]:
     """Generates a medical and clinical summary of the user by getting medications and medical info."""
-    user_id = config.get("configurable", {}).get("thread_id")
+    user_id = config.get("configurable", {}).get("user_id") or config.get("configurable", {}).get("thread_id")
     result = {}
     
     try:

@@ -60,10 +60,18 @@ const NearbyHospitalsScreen = () => {
       const type = 'hospital';
       const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lng}&radius=${radius}&type=${type}&key=${GOOGLE_API_KEY}`;
       
+      const androidPackage = Constants.expoConfig?.android?.package ;
+      const androidCert = Constants.expoConfig?.extra?.googleMapsCert ;
+      if(!androidCert || !androidPackage){
+        Alert.alert("Google Maps API Error", "No Android certificate or package provided.");
+        setPlaces(mockPlaces);
+        setLoading(false);
+        return;
+      }
       const response = await fetch(url, {
         headers: {
-          'X-Android-Package': 'com.anonymous.mobileclient',
-          'X-Android-Cert': 'C0C186E94304AD89114E874885B0C567DB050892'
+          'X-Android-Package': androidPackage,
+          'X-Android-Cert': androidCert
         }
       });
       const data = await response.json();
@@ -108,13 +116,21 @@ const NearbyHospitalsScreen = () => {
        return;
     }
 
+    const androidPackage = Constants.expoConfig?.android?.package ;
+    const androidCert = Constants.expoConfig?.extra?.googleMapsCert ;
+    if(!androidCert || !androidPackage){
+      Alert.alert("Google Maps API Error", "No Android certificate or package provided.");
+      setPlaces(mockPlaces);
+      setLoading(false);
+      return;
+    }
     setLoadingDetails(true);
     try {
        const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${place.id}&fields=name,rating,formatted_phone_number,formatted_address,opening_hours,user_ratings_total&key=${GOOGLE_API_KEY}`;
        const response = await fetch(url, {
          headers: {
-           'X-Android-Package': 'com.anonymous.mobileclient',
-           'X-Android-Cert': 'C0C186E94304AD89114E874885B0C567DB050892'
+           'X-Android-Package': androidPackage,
+           'X-Android-Cert': androidCert
          }
        });
        const data = await response.json();

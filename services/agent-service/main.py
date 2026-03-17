@@ -89,8 +89,9 @@ async def websocket_endpoint(websocket: WebSocket):
         import uuid
         chat_id = str(uuid.uuid4())
     
-    # Initialize config for this user session with chat_id
-    config = {"configurable": {"thread_id": chat_id}}
+    # thread_id = chat session ID (used by LangGraph checkpointer for memory)
+    # user_id is stored separately so tools can access the real user identity
+    config = {"configurable": {"thread_id": chat_id, "user_id": user_id}}
     chat_created_in_session = False
     
     try:
