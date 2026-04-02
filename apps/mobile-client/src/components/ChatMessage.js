@@ -2,6 +2,25 @@ import React from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 
 const ChatMessage = ({ message, isUser, status, toolLabel, isStatus }) => {
+  const renderMessageText = (msgText, isUserTheme) => {
+    if (!msgText) return null;
+    const parts = msgText.split(/(\*\*.*?\*\*)/g);
+    return (
+      <Text style={[styles.text, isUserTheme && styles.userText]}>
+        {parts.map((part, index) => {
+          if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
+            return (
+              <Text key={index} style={{ fontWeight: 'bold' }}>
+                {part.slice(2, -2)}
+              </Text>
+            );
+          }
+          return part;
+        })}
+      </Text>
+    );
+  };
+
   if (isStatus) {
     return (
       <View style={styles.statusContainer}>
@@ -31,7 +50,7 @@ const ChatMessage = ({ message, isUser, status, toolLabel, isStatus }) => {
       )}
 
       {/* The actual text message */}
-      {!!message && <Text style={[styles.text, isUser && styles.userText]}>{message}</Text>}
+      {!!message && renderMessageText(message, isUser)}
 
       {/* If it's processing but no tool label and message is empty */}
       {status === 'processing' && !toolLabel && !message && (

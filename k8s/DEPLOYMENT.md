@@ -102,7 +102,7 @@ stringData:
 
   # Gemini / Google
   GEMINI_API_KEY: "AIza..."
-  GEMINI_MODEL:   "gemini-2.5-pro"
+  GEMINI_MODEL:   "gemini-2.5-flash"
 
   # Vertex AI provider switch
   GEMINI_PROVIDER: "vertexai"  # "vertexai" or "genai"
