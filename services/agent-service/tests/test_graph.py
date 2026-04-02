@@ -16,6 +16,13 @@ def test_should_continue_tools():
     result = should_continue(state)
     assert result == "tools"
 
+def test_should_continue_human_node():
+    from agent.graph import should_continue
+    ai_msg = AIMessage(content="", tool_calls=[{"name": "ask_user", "args": {"question": "Time?"}, "id": "123"}])
+    state = {"messages": [HumanMessage(content="Do something"), ai_msg]}
+    result = should_continue(state)
+    assert result == "human_node"
+
 @patch("agent.graph.llm_with_tools")
 def test_call_model(mock_llm):
     from agent.graph import call_model
@@ -25,3 +32,9 @@ def test_call_model(mock_llm):
     result = call_model(state, config={"configurable": {"thread_id": "test_user"}})
     assert len(result["messages"]) == 1
     assert result["messages"][0].content == "Test Response"
+
+def test_human_input_node():
+    from agent.graph import human_input_node
+    state = {"messages": [HumanMessage(content="Hello")]}
+    result = human_input_node(state)
+    assert result == {"messages": []}

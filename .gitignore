@@ -10,7 +10,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
-package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
@@ -82,6 +81,7 @@ test-results/
 *.pickle
 *.joblib
 *.h5
+indexClear.py
 vectors/
 embeddings/
 
@@ -136,5 +136,9 @@ coverage/
 .DS_Store
 Thumbs.db
 
+#k8s
+aushadx-deployment.yaml
 
 profile-client/
+
+keystore.json

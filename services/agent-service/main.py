@@ -1,8 +1,12 @@
 import os
-from fastapi import FastAPI, HTTPException
+import json
+import jwt
+from typing import List
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Header
 from pydantic import BaseModel
 from agent.graph import graph
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, ToolMessage
+from database import create_chat, update_chat_timestamp, get_user_chats, get_chat, delete_chat, update_chat_title
 from utils.logger import logger
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -19,40 +23,236 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class ChatRequest(BaseModel):
-    message: str
-    user_id: str
+# Shared Key or Public Key for JWT Verification
+# In prod, load from file or JWKS. For now, using a simple check or decoding without verification if purely internal trusting gateway?
+# IMPORTANT: Gateway already verifies the token. 
+# However, to be safe and extract user_id, we decode it here.
+# Assuming Gateway passes X-User-Id header? WebSockets don't pass headers easily in all clients.
+# But we are using a Proxy. The Proxy *can* pass headers if configured.
+# Our Gateway implementation passes `req.headers["x-user-id"] = decoded.sub`.
+# But for WebSocket in FastAPI, accessing headers is done via `websocket.headers`.
 
-class ChatResponse(BaseModel):
-    response: str
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
 
-@app.post("/api/agent/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def send_personal_message(self, message: str, websocket: WebSocket):
+        await websocket.send_text(message)
+
+manager = ConnectionManager()
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    logger.info("New WebSocket connection attempt")
+    # Gateway should have verified token and injected X-User-Id.
+    # However, http-proxy logic for WS might be tricky with headers.
+    # Let's verify if we get the header.
+    
+    user_id = websocket.headers.get("x-user-id")
+    logger.info(f"Headers: {websocket.headers}")
+    
+    # If header is missing (e.g. proxy didn't inject it or client connected directly), 
+    # we might fallback to token query param if we want to support direct checks.
+    # But strictly speaking, we rely on Gateway.
+    
+    if not user_id:
+        # Check for query param token as fallback or dev testing
+        # This is strictly for robustness if Gateway header injection fails on WS upgrade
+        token = websocket.query_params.get("token")
+        if token:
+             try:
+                # Decode without verification (Gateway does verification) or verify if you have the key
+                # For safety, we should verify if exposed directly. 
+                # But here we assume Gateway did it.
+                decoded = jwt.decode(token, options={"verify_signature": False})
+                user_id = decoded.get("sub") or decoded.get("id")
+             except Exception:
+                 pass
+    
+    if not user_id:
+        logger.warning("Connection attempt without user_id")
+        await websocket.close(code=1008)
+        return
+
+    logger.info(f"User ID from token/header: {user_id}")
+    await manager.connect(websocket)
+    
+    chat_id = websocket.query_params.get("chatId")
+    if not chat_id:
+        import uuid
+        chat_id = str(uuid.uuid4())
+    
+    client_timezone = websocket.query_params.get("tz") or "UTC"
+    client_tz_offset = websocket.query_params.get("tzOffset")
+    
+    # thread_id = chat session ID (used by LangGraph checkpointer for memory)
+    # user_id is stored separately so tools can access the real user identity
+    # client_timezone is injected to ensure scheduling uses the device's actual exact time offset
+    config = {"configurable": {"thread_id": chat_id, "user_id": user_id, "client_timezone": client_timezone, "client_tz_offset": client_tz_offset}}
+    chat_created_in_session = False
+    
     try:
-        logger.info(f"Received chat request from {request.user_id}: {request.message}")
-        
-        # Determine thread config for persistence if using checkpointer
-        config = {"configurable": {"thread_id": request.user_id}}
-        
-        inputs = {"messages": [HumanMessage(content=request.message)]}
-        
-        # Invoke the graph
-        # For simplicity in this REST API, we invoke and wait for the final result.
-        # In a real-world scenario, you might use .stream() and yield SSE.
-        result = await graph.ainvoke(inputs, config=config)
-        
-        last_message = result["messages"][-1]
-        response_content = last_message.content
-        
-        return ChatResponse(response=response_content)
+        while True:
+            data = await websocket.receive_text()
+            logger.info(f"Received from {user_id}: {data}")
+            
+            requestId = None
+            try:
+                parsed_data = json.loads(data)
+                user_message = parsed_data.get("message", data)
+                requestId = parsed_data.get("requestId")
+            except json.JSONDecodeError:
+                user_message = data
+            
+            if not chat_created_in_session:
+                chat_doc = await get_chat(chat_id, user_id)
+                if not chat_doc:
+                    title = user_message[:30].strip() + ("..." if len(user_message) > 30 else "")
+                    await create_chat(user_id=user_id, chat_id=chat_id, title=title)
+                    
+                    import asyncio
+                    from agent.graph import llm
+                    async def generate_title(c_id, u_id, u_msg):
+                        try:
+                            prompt = f"Generate a short, concise title (max 5 words) for a chat that starts with this user query: '{u_msg}'. Respond with ONLY the title. No quotes."
+                            response = await llm.ainvoke([HumanMessage(content=prompt)])
+                            new_title = response.content.strip().replace('"', '').replace("'", "")
+                            await update_chat_title(c_id, u_id, new_title)
+                            await manager.send_personal_message(json.dumps({"type": "chat_title", "title": new_title}), websocket)
+                        except Exception as e:
+                            logger.error(f"Failed to generate explicit chat title: {e}")
+                            
+                    asyncio.create_task(generate_title(chat_id, user_id, user_message))
+                else:
+                    await update_chat_timestamp(chat_id, user_id)
+                chat_created_in_session = True
+            else:
+                await update_chat_timestamp(chat_id, user_id)
 
+            inputs = {"messages": [HumanMessage(content=user_message)]}
+            
+            TOOL_LABELS = {
+                "get_upcoming_reminders": "Fetching reminders",
+                "get_pending_or_missed_reminders": "Checking missed doses",
+                "analyze_medicine": "Analyzing medicine",
+                "check_medicine_taken": "Verifying logs",
+                "check_schedule_complications": "Checking complications",
+                "schedule_reminder": "Scheduling reminder",
+                "update_reminder": "Updating schedule",
+                "generate_medical_summary": "Generating summary",
+                "get_current_datetime": "Checking time"
+            }
+            
+            async for msg, metadata in graph.astream(inputs, config=config, stream_mode="messages"):
+                if getattr(msg, 'type', '') == 'ai':
+                    if hasattr(msg, 'tool_call_chunks') and msg.tool_call_chunks:
+                        for chunk in msg.tool_call_chunks:
+                            if hasattr(chunk, 'get') and chunk.get("name"):
+                                tool_name = chunk["name"]
+                                label = TOOL_LABELS.get(tool_name, f"Running {tool_name}")
+                                payload = {"type": "tool_start", "label": label}
+                                if requestId: payload["requestId"] = requestId
+                                await manager.send_personal_message(json.dumps(payload), websocket)
+                    
+                    # Tool is now fully assigned and executed downstream
+                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                        for tcall in msg.tool_calls:
+                            if hasattr(tcall, 'get') and tcall.get("name"):
+                                tool_name = tcall["name"]
+                                label = TOOL_LABELS.get(tool_name, f"Running {tool_name}")
+                                payload = {"type": "tool_start", "label": label}
+                                if requestId: payload["requestId"] = requestId
+                                await manager.send_personal_message(json.dumps(payload), websocket)
+                    
+                    if hasattr(msg, 'content') and msg.content:
+                        if isinstance(msg.content, str):
+                            payload = {"type": "message", "text": msg.content}
+                            if requestId: payload["requestId"] = requestId
+                            await manager.send_personal_message(json.dumps(payload), websocket)
+                        elif isinstance(msg.content, list):
+                            for item in msg.content:
+                                if isinstance(item, dict) and "text" in item:
+                                    payload = {"type": "message", "text": item["text"]}
+                                    if requestId: payload["requestId"] = requestId
+                                    await manager.send_personal_message(json.dumps(payload), websocket)
+                                    
+                elif getattr(msg, 'type', '') == 'tool':
+                     payload = {"type": "tool_end"}
+                     if requestId: payload["requestId"] = requestId
+                     await manager.send_personal_message(json.dumps(payload), websocket)
+            
+            done_payload = {"type": "done"}
+            if requestId: done_payload["requestId"] = requestId
+            await manager.send_personal_message(json.dumps(done_payload), websocket)
+
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        logger.info(f"Client {user_id} disconnected")
     except Exception as e:
-        logger.error(f"Error processing chat request: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"WebSocket error: {e}", exc_info=True)
+        try:
+            await manager.send_personal_message(json.dumps({"type": "error", "text": str(e)}), websocket)
+        except:
+            pass
+        manager.disconnect(websocket)
 
 @app.get("/health")
 def health_check():
     return {"status": "ok", "service": "agent-service"}
+
+@app.get("/chats/{user_id}")
+async def fetch_user_chats_endpoint(user_id: str):
+    return await get_user_chats(user_id)
+
+@app.get("/chats/{chat_id}/messages/{user_id}")
+async def fetch_chat_messages_endpoint(chat_id: str, user_id: str):
+    chat_doc = await get_chat(chat_id, user_id)
+    if not chat_doc:
+        raise HTTPException(status_code=404, detail="Chat not found")
+        
+    config = {"configurable": {"thread_id": chat_id}}
+    state = graph.get_state(config)
+    messages = state.values.get("messages", [])
+    
+    formatted = []
+    for msg in messages:
+         # Skip tool and system messages for simplicity, just show Human and AI
+         if getattr(msg, 'type', '') not in ['human', 'ai']:
+             continue
+         is_user = getattr(msg, 'type', '') == 'human'
+         content = msg.content
+         if isinstance(content, str):
+             if content.strip():
+                 formatted.append({"isUser": is_user, "text": content})
+         elif isinstance(content, list):
+             text_content = " ".join([item.get("text", "") for item in content if isinstance(item, dict) and "text" in item])
+             if text_content.strip():
+                 formatted.append({"isUser": is_user, "text": text_content})
+    return formatted
+
+class UpdateChatRequest(BaseModel):
+    title: str
+
+@app.delete("/chats/{chat_id}/{user_id}")
+async def delete_user_chat(chat_id: str, user_id: str):
+    success = await delete_chat(chat_id, user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Chat not found or already deleted")
+    return {"status": "success", "message": "Chat deleted"}
+
+@app.put("/chats/{chat_id}/{user_id}")
+async def update_user_chat(chat_id: str, user_id: str, body: UpdateChatRequest):
+    success = await update_chat_title(chat_id, user_id, body.title)
+    if not success:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return {"status": "success", "message": "Chat updated"}
 
 if __name__ == "__main__":
     import uvicorn

@@ -4,7 +4,13 @@ import request from "supertest";
 // Mock dependencies
 jest.unstable_mockModule("../src/services/llmClient.js", () => ({
   default: {
+    callStructured: jest.fn().mockResolvedValue({
+      is_medicine_label: true,
+      drug_name: "Mock Drug",
+      recommendations: ["Take with water"],
+    }),
     callGeminiStructured: jest.fn().mockResolvedValue({
+      is_medicine_label: true,
       drug_name: "Mock Drug",
       recommendations: ["Take with water"],
     }),
@@ -44,7 +50,7 @@ describe("Medicine Analyzer API", () => {
     // Mock profile response
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ status: true, data: { medical_info: { medical_history: "None" } } }),
+      json: async () => ({ status: true, data: { medical_info: { medical_info: "None" } } }),
     });
 
     const res = await request(app)
@@ -60,7 +66,7 @@ describe("Medicine Analyzer API", () => {
     // Verify fetch was called without Auth header (since we removed it)
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const fetchCalls = mockFetch.mock.calls[0];
-    expect(fetchCalls[0]).toContain("/profile/user123/medical-info");
+    expect(fetchCalls[0]).toContain("/profile/medical-info/user123");
     // Verify no Authorization header in headers
     expect(fetchCalls[1].headers).not.toHaveProperty("Authorization");
   });

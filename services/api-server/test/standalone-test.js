@@ -2,7 +2,7 @@ import { spawn } from "child_process";
 import http from "http";
 import assert from "assert";
 
-const PORT = 3001; // Ensure this matches environment or test config
+const PORT = process.env.PORT || 3000; // Ensure this matches environment or test config
 
 function startServer() {
   return new Promise((resolve, reject) => {

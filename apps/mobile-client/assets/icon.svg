@@ -1,0 +1,90 @@
+<svg viewBox="0 0 512 512" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#4B90A6" />
+      <stop offset="100%" stop-color="#245173" />
+    </linearGradient>
+
+    <linearGradient id="cross-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#EAF9FB" />
+      <stop offset="100%" stop-color="#C5E8ED" />
+    </linearGradient>
+
+    <linearGradient id="pill-blue-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#14467D" />
+      <stop offset="50%" stop-color="#2162A3" />
+      <stop offset="100%" stop-color="#0D2E57" />
+    </linearGradient>
+
+    <linearGradient id="pill-white-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#E2F1F5" />
+      <stop offset="40%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#CBE1E8" />
+    </linearGradient>
+
+    <filter id="shadow-cross" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#081A29" flood-opacity="0.4" />
+    </filter>
+
+    <filter id="shadow-pill" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="-6" dy="14" stdDeviation="16" flood-color="#051524" flood-opacity="0.6" />
+    </filter>
+
+    <clipPath id="pill-clip">
+      <rect x="196" y="116" width="120" height="280" rx="60" />
+    </clipPath>
+
+    <g id="circuit-quadrant" stroke="#7CC6D4" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 196 196 L 126 126 L 66 126" />
+      <circle cx="66" cy="126" r="6" fill="#7CC6D4" stroke="none" />
+      
+      <path d="M 196 170 L 146 120 L 146 66" />
+      <circle cx="146" cy="66" r="6" fill="#7CC6D4" stroke="none" />
+      
+      <path d="M 170 196 L 120 146 L 66 146" />
+      <circle cx="66" cy="146" r="6" fill="#7CC6D4" stroke="none" />
+      
+      <path d="M 216 196 L 166 146 L 166 96 L 126 56" />
+      <circle cx="126" cy="56" r="6" fill="#7CC6D4" stroke="none" />
+      
+      <path d="M 196 216 L 146 166 L 96 166 L 56 126" />
+      <circle cx="56" cy="126" r="6" fill="#7CC6D4" stroke="none" />
+    </g>
+  </defs>
+
+  <rect width="512" height="512" rx="116" fill="url(#bg-grad)" />
+
+  <g opacity="0.85">
+    <use href="#circuit-quadrant" />
+    <use href="#circuit-quadrant" transform="rotate(90 256 256)" />
+    <use href="#circuit-quadrant" transform="rotate(180 256 256)" />
+    <use href="#circuit-quadrant" transform="rotate(270 256 256)" />
+  </g>
+
+  <path 
+    d="M 196 76 
+       L 316 76 L 316 196 
+       L 436 196 L 436 316 
+       L 316 316 L 316 436 
+       L 196 436 L 196 316 
+       L 76 316 L 76 196 
+       L 196 196 Z" 
+    fill="url(#cross-grad)" 
+    stroke="#8EDCE8" 
+    stroke-width="16" 
+    stroke-linejoin="round" 
+    filter="url(#shadow-cross)" 
+  />
+
+  <g filter="url(#shadow-pill)">
+    <g transform="rotate(45 256 256)">
+      <rect x="196" y="116" width="120" height="280" rx="60" fill="url(#pill-white-grad)" />
+      
+      <rect x="196" y="256" width="120" height="140" fill="url(#pill-blue-grad)" clip-path="url(#pill-clip)" />
+      
+      <line x1="196" y1="256" x2="316" y2="256" stroke="#0B233D" stroke-width="4" />
+      
+      <rect x="210" y="126" width="16" height="260" rx="8" fill="#FFFFFF" opacity="0.6" clip-path="url(#pill-clip)" />
+    </g>
+  </g>
+</svg>

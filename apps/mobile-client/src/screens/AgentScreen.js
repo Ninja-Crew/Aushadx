@@ -1,0 +1,464 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { View, TextInput, TouchableOpacity, Text, FlatList, StyleSheet, Platform, Keyboard, KeyboardAvoidingView, Modal, ActivityIndicator } from 'react-native';
+import Constants from 'expo-constants';
+import ChatMessage from '../components/ChatMessage';
+import { useTheme } from '../context/ThemeContext';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { refreshTokenCall } from '../api/auth';
+import { getToken, getRefreshToken, saveToken } from '../utils/storage';
+import { fetchChats, fetchChatMessages, deleteChat } from '../api/agent';
+
+const generateUUID = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+  });
+};
+
+const AgentScreen = ({ route, navigation }) => {
+  const { token } = route.params || {};
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  
+  const [currentChatId, setCurrentChatId] = useState(generateUUID());
+  const [messages, setMessages] = useState([
+    { id: '__status__', text: '● Connecting...', isUser: false, isStatus: true }
+  ]);
+  const [input, setInput] = useState('');
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isAgentProcessing, setIsAgentProcessing] = useState(false);
+  const [isHistoryVisible, setHistoryVisible] = useState(false);
+  const [chatHistory, setChatHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  
+  const ws = useRef(null);
+  const reconnectTimeout = useRef(null);
+
+  // Set up header - AgentScreen is embedded via CustomHeader now
+  // We can listen to openHistory param to toggle modal
+  useEffect(() => {
+    if (route.params?.openHistory) {
+      loadAndShowHistory();
+      // Reset param so it doesn't trigger on every render if navigating back
+      navigation.setParams({ openHistory: undefined });
+    }
+  }, [route.params?.openHistory]);
+
+  const loadAndShowHistory = async () => {
+    setHistoryVisible(true);
+    setLoadingHistory(true);
+    try {
+      const jwtToken = await getToken();
+      const data = await fetchChats(jwtToken);
+      setChatHistory(data || []);
+    } catch (e) {
+      console.log("Failed to load history", e);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const selectChat = async (chatId) => {
+    setHistoryVisible(false);
+    if (chatId === currentChatId) return;
+    
+    // Switch chat
+    setMessages([{ id: '__status__', text: '● Loading messages...', isUser: false, isStatus: true }]);
+    setCurrentChatId(chatId);
+    
+    try {
+      const jwtToken = await getToken();
+      const historyMessages = await fetchChatMessages(jwtToken, chatId);
+      const formattedMsgs = historyMessages.map((m, i) => ({
+        id: 'hist_' + i, text: m.text, isUser: m.isUser
+      }));
+      formattedMsgs.push({ id: '__status__', text: '● Connecting...', isUser: false, isStatus: true });
+      setMessages(formattedMsgs);
+    } catch (e) {
+      console.log("Failed to load chat messages", e);
+      setMessages([{ id: '__status__', text: '● Connecting...', isUser: false, isStatus: true }]);
+    }
+  };
+
+  const startNewChat = () => {
+    setHistoryVisible(false);
+    setMessages([{ id: '__status__', text: '● Connecting...', isUser: false, isStatus: true }]);
+    setCurrentChatId(generateUUID());
+  };
+
+  const handleDeleteChat = async (chatId) => {
+    try {
+      const jwtToken = await getToken();
+      await deleteChat(jwtToken, chatId);
+      setChatHistory(prev => prev.filter(c => c.chat_id !== chatId));
+      if (chatId === currentChatId) {
+        startNewChat();
+      }
+    } catch (e) {
+      console.log("Failed to delete chat", e);
+    }
+  };
+
+  // Keyboard height tracking — precise alternative to KeyboardAvoidingView on Android
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      });
+      const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+        setKeyboardHeight(0);
+      });
+      return () => {
+        showSub.remove();
+        hideSub.remove();
+      };
+    }
+  }, []);
+
+  useEffect(() => {
+    const BASE_URL = Constants.expoConfig?.extra?.baseUrl || 'http://192.168.0.107:30000';
+    
+    let wsUrlString = BASE_URL;
+    if (Platform.OS === 'android' && (BASE_URL.includes('localhost') || BASE_URL.includes('127.0.0.1'))) {
+      wsUrlString = BASE_URL.replace('localhost', '10.0.2.2').replace('127.0.0.1', '10.0.2.2');
+    }
+    
+    // Convert http/https to ws/wss
+    if (wsUrlString.startsWith('http://')) {
+      wsUrlString = wsUrlString.replace('http://', 'ws://');
+    } else if (wsUrlString.startsWith('https://')) {
+      wsUrlString = wsUrlString.replace('https://', 'wss://');
+    }
+    
+    // Build a fresh WS URL using the latest access token from storage
+    const getWsUrl = async () => {
+      const currentToken = await getToken();
+      let tz = 'UTC';
+      try {
+        tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      } catch (e) {}
+      const tzOffset = new Date().getTimezoneOffset();
+      return `${wsUrlString.replace(/\/$/, '')}/ws?token=${currentToken}&chatId=${currentChatId}&tz=${encodeURIComponent(tz)}&tzOffset=${tzOffset}`;
+    };
+
+    // Refresh access token via stored refresh token
+    const refreshAccessToken = async () => {
+      const refreshToken = await getRefreshToken();
+      if (!refreshToken) throw new Error('No refresh token');
+      const data = await refreshTokenCall(refreshToken);
+      const newAccess = data?.tokens?.access || data?.accessToken;
+      const newRefresh = data?.tokens?.refresh || data?.refreshToken || refreshToken;
+      if (!newAccess) throw new Error('Failed to retrieve new access token');
+      await saveToken(newAccess, newRefresh);
+    };
+
+    // Upserts the status message at the BOTTOM — always visible, never duplicated
+    const setStatusMessage = (text) => {
+      setMessages(prev => {
+        const filtered = prev.filter(m => m.id !== '__status__');
+        return [...filtered, { id: '__status__', text, isUser: false, isStatus: true }];
+      });
+    };
+
+    let authRetryCount = 0;
+
+    const connectWebSocket = async () => {
+      const wsUrl = await getWsUrl();
+      console.log('Connecting to WS:', wsUrl);
+      ws.current = new WebSocket(wsUrl);
+
+      ws.current.onopen = () => {
+        console.log('WebSocket Connected');
+        setIsConnected(true);
+        authRetryCount = 0; // reset on successful connection
+        if (reconnectTimeout.current) {
+          clearTimeout(reconnectTimeout.current);
+          reconnectTimeout.current = null;
+        }
+        setStatusMessage('✓ Connected to Agent');
+      };
+
+      ws.current.onmessage = (e) => {
+        try {
+          const payload = JSON.parse(e.data);
+          const { type, text, requestId, label, title } = payload;
+          
+          if (type === 'chat_title') {
+            setChatHistory(prev => prev.map(c => c.chat_id === currentChatId ? { ...c, title } : c));
+            return;
+          }
+
+          setMessages(prev => {
+            const newMessages = [...prev];
+            const aiIdx = newMessages.findIndex(m => m.id === requestId);
+            
+            if (aiIdx !== -1) {
+              if (type === 'message') {
+                newMessages[aiIdx] = { ...newMessages[aiIdx], text: newMessages[aiIdx].text + text, status: 'processing' };
+              } else if (type === 'tool_start') {
+                newMessages[aiIdx] = { ...newMessages[aiIdx], toolLabel: label, status: 'processing' };
+              } else if (type === 'tool_end') {
+                newMessages[aiIdx] = { ...newMessages[aiIdx], status: 'processing' }; // Intentionally leaving toolLabel intact during the LLM translation latency
+              } else if (type === 'done' || type === 'error') {
+                newMessages[aiIdx] = { ...newMessages[aiIdx], status: 'done', toolLabel: null };
+                if (type === 'error' && text) {
+                   newMessages[aiIdx].text += '\n[Error: ' + text + ']';
+                }
+                
+                const nextQueuedIdx = newMessages.findIndex(m => m.status === 'queued');
+                if (nextQueuedIdx !== -1) {
+                  newMessages[nextQueuedIdx] = { ...newMessages[nextQueuedIdx], status: 'processing' };
+                } else {
+                  setIsAgentProcessing(false);
+                }
+              }
+            } else {
+               // Fallback
+               if (type === 'message' || !type) {
+                 const fallbackText = type === 'message' ? text : String(payload);
+                 const filtered = newMessages.filter(m => m.id !== '__status__');
+                 const lastIdx = filtered.length - 1;
+                 if (filtered.length > 0 && !filtered[lastIdx].isUser && filtered[lastIdx].id !== '__status__') {
+                   filtered[lastIdx] = { ...filtered[lastIdx], text: filtered[lastIdx].text + fallbackText };
+                 } else {
+                   filtered.push({ id: Math.random().toString(), text: fallbackText, isUser: false });
+                 }
+                 return filtered;
+               }
+            }
+            return newMessages;
+          });
+        } catch (err) {
+          // Fallback for raw text
+          const text = e.data;
+          setMessages(prev => {
+            const newMessages = [...prev];
+            const lastIdx = newMessages.length - 1;
+            if (newMessages.length > 0 && !newMessages[lastIdx].isUser && newMessages[lastIdx].id !== '__status__') {
+              newMessages[lastIdx] = { ...newMessages[lastIdx], text: newMessages[lastIdx].text + text };
+            } else {
+              const filtered = newMessages.filter(m => m.id !== '__status__');
+              filtered.push({ id: Math.random().toString(), text, isUser: false });
+              return filtered;
+            }
+            return newMessages;
+          });
+        }
+      };
+
+      ws.current.onerror = (e) => {
+        console.log('WebSocket Error:', e.message);
+      };
+
+      ws.current.onclose = async (e) => {
+        const errorReason = e.reason || (e.message ? e.message : '');
+        console.log('WebSocket Closed:', e.code, errorReason);
+        setIsConnected(false);
+
+        const reason = errorReason.toLowerCase();
+        
+        // Only treat as auth error if explicitly stated or code is 4001 (Unauthorized)
+        // If it's a 1006 (Abnormal Closure), check if the OS actually noted a 401 handshake refusal
+        const isAuthError =
+          reason.includes('expired') ||
+          reason.includes('jwt') ||
+          reason.includes('401') ||
+          reason.includes('unauthorized') ||
+          e.code === 4001;
+
+        if (isAuthError && authRetryCount < 1) {
+          authRetryCount++;
+          setStatusMessage('⟳ Verifying session...');
+          try {
+            await refreshAccessToken();
+            // Automatically and immediately retry once the token is refreshed
+            connectWebSocket();
+            return; // stop the 3-second timeout
+          } catch (err) {
+            console.log('Token refresh failed:', err);
+            // Don't kill the loop if offline. If actual auth rejection, err logic would not be pure Network Error.
+            const isNetworkError = err.message && (err.message.includes('Network Error') || err.message.includes('fetch'));
+            if (isNetworkError) {
+              setStatusMessage('⟳ Network error, reconnecting...');
+              authRetryCount = 0; // reset so we can try refreshing again when online if needed
+            } else {
+              setStatusMessage('✗ Session expired. Please log in again.');
+              return; // Stop the auto-reconnect entirely
+            }
+          }
+        } else {
+          setStatusMessage('⟳ Reconnecting...');
+        }
+
+        reconnectTimeout.current = setTimeout(() => {
+          connectWebSocket();
+        }, 3000);
+      };
+
+    };
+
+    connectWebSocket();
+
+    return () => {
+      if (reconnectTimeout.current) {
+        clearTimeout(reconnectTimeout.current);
+      }
+      if (ws.current) {
+        ws.current.close();
+      }
+    };
+  }, [token, currentChatId]);
+
+  const sendMessage = () => {
+    if (!input.trim() || !isConnected) return;
+
+    const msg = input.trim();
+    const requestId = generateUUID();
+    
+    setMessages(prev => {
+      const filtered = prev.filter(m => m.id !== '__status__');
+      const userMsg = { id: Math.random().toString(), text: msg, isUser: true };
+      const aiMsg = { 
+        id: requestId, 
+        text: '', 
+        isUser: false, 
+        status: isAgentProcessing ? 'queued' : 'processing',
+        toolLabel: null
+      };
+      return [...filtered, userMsg, aiMsg];
+    });
+
+    if (!isAgentProcessing) {
+       setIsAgentProcessing(true);
+    }
+
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ message: msg, requestId }));
+    } else {
+      console.log("WS not open");
+    }
+    setInput('');
+  };
+
+  const renderContent = () => {
+    return (
+      <>
+        <FlatList
+          data={messages}
+          keyExtractor={item => item.id.toString()}
+          renderItem={({ item }) => (
+            <ChatMessage 
+              message={item.text} 
+              isUser={item.isUser} 
+              status={item.status} 
+              toolLabel={item.toolLabel} 
+              isStatus={item.isStatus} 
+            />
+          )}
+          contentContainerStyle={styles.list}
+          style={{ flex: 1 }}
+        />
+        <View style={[
+          styles.inputContainer,
+          {
+            borderColor: colors.border,
+            backgroundColor: colors.card,
+            paddingBottom: Platform.OS === 'android' && keyboardHeight > 0 ? 8 : insets.bottom + 8
+          }
+        ]}>
+          <TextInput
+            style={[styles.input, { borderColor: colors.border, backgroundColor: isConnected ? colors.inputBg : colors.border, color: colors.text, opacity: isConnected ? 1 : 0.6 }]}
+            value={input}
+            onChangeText={setInput}
+            placeholder={isConnected ? "Type a message..." : "Waiting for connection..."}
+            placeholderTextColor={colors.textSecondary}
+            editable={isConnected}
+          />
+          <TouchableOpacity 
+             onPress={sendMessage} 
+             disabled={!isConnected}
+             style={[styles.sendBtn, { backgroundColor: isConnected ? colors.primary : colors.textSecondary }]}>
+            <MaterialIcons name="send" size={22} color="#fff" />
+          </TouchableOpacity>
+        </View>
+
+        <Modal visible={isHistoryVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setHistoryVisible(false)}>
+          <View style={{
+            flex: 1, 
+            backgroundColor: colors.background, 
+            paddingTop: Math.max(insets.top, Platform.OS === 'ios' ? 40 : 20), 
+            paddingBottom: insets.bottom + 10,
+            paddingHorizontal: 20
+          }}>
+            <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20}}>
+              <Text style={{fontSize: 22, fontWeight: 'bold', color: colors.text}}>Chat History</Text>
+              <TouchableOpacity onPress={() => setHistoryVisible(false)}>
+                <MaterialIcons name="close" size={28} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity style={[styles.newChatBtn, {backgroundColor: colors.primary}]} onPress={startNewChat}>
+              <MaterialIcons name="add" size={20} color="#fff" />
+              <Text style={{color: '#fff', fontSize: 16, fontWeight: 'bold', marginLeft: 8}}>New Chat</Text>
+            </TouchableOpacity>
+            {loadingHistory ? (
+               <ActivityIndicator size="large" color={colors.primary} style={{marginTop: 20}} />
+            ) : (
+               <FlatList
+                 data={chatHistory}
+                 keyExtractor={item => item.chat_id}
+                 renderItem={({item}) => (
+                   <View style={[styles.historyItemContainer, { borderBottomColor: colors.border }]}>
+                     <TouchableOpacity style={styles.historyItem} onPress={() => selectChat(item.chat_id)}>
+                       <Text style={{color: colors.text, fontSize: 16, fontWeight: item.chat_id === currentChatId ? 'bold' : 'normal'}} numberOfLines={1}>{item.title || "New Chat"}</Text>
+                       <Text style={{color: colors.textSecondary, fontSize: 12, marginTop: 4}}>{new Date(item.updated_at).toLocaleString()}</Text>
+                     </TouchableOpacity>
+                     <TouchableOpacity onPress={() => handleDeleteChat(item.chat_id)} style={{padding: 10, paddingRight: 0}}>
+                       <MaterialIcons name="delete" size={24} color={colors.error || '#ff4444'} />
+                     </TouchableOpacity>
+                   </View>
+                 )}
+                 ListEmptyComponent={<Text style={{color: colors.textSecondary, textAlign: 'center', marginTop: 20}}>No previous chats found.</Text>}
+               />
+            )}
+          </View>
+        </Modal>
+      </>
+    );
+  };
+
+  if (Platform.OS === 'android') {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background, paddingBottom: keyboardHeight===0?0:keyboardHeight-58}]}>
+        {renderContent()}
+      </View>
+    );
+  }
+
+  return (
+    <KeyboardAvoidingView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      behavior="padding"
+      keyboardVerticalOffset={90}
+    >
+      {renderContent()}
+    </KeyboardAvoidingView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  list: { padding: 10 },
+  inputContainer: { flexDirection: 'row', padding: 10, borderTopWidth: 1, alignItems: 'center' },
+  input: {
+    flex: 1, borderWidth: 1, borderRadius: 20,
+    paddingHorizontal: 15, paddingVertical: 8, marginRight: 10,
+  },
+  sendBtn: { width: 42, height: 42, borderRadius: 21, justifyContent: 'center', alignItems: 'center' },
+  newChatBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 12, borderRadius: 10, marginBottom: 15 },
+  historyItemContainer: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1 },
+  historyItem: { flex: 1, paddingVertical: 15 }
+});
+
+export default AgentScreen;
