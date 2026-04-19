@@ -13,11 +13,7 @@ export async function signup(req, res) {
 
     // Validate input
     if (!email || !password || !name) {
-      return error(
-        res,
-        (message = "Email, password, and name are required"),
-        (status = 400),
-      );
+      return error(res, "Email, password, and name are required", 400);
     }
 
     const user = await authService.registerUser({ email, password, name });
@@ -307,12 +303,23 @@ export async function resetPassword(req, res) {
     }
 
     // Verify the authorized session token
-    const verification = otpService.verifyOTPToken(resetSessionToken, "AUTHORIZED");
+    const verification = otpService.verifyOTPToken(
+      resetSessionToken,
+      "AUTHORIZED",
+    );
     if (!verification.valid) {
       if (verification.reason === "OTP expired") {
-        return error(res, "Password reset session has expired (exceeded 10 minutes). Please request a new OTP.", 401);
+        return error(
+          res,
+          "Password reset session has expired (exceeded 10 minutes). Please request a new OTP.",
+          401,
+        );
       }
-      return error(res, `Session verification failed: ${verification.reason}`, 401);
+      return error(
+        res,
+        `Session verification failed: ${verification.reason}`,
+        401,
+      );
     }
 
     // Ensure email in token matches request

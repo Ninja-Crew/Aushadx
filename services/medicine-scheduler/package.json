@@ -9,7 +9,10 @@
     "dev": "nodemon src/index.js",
     "worker": "node src/worker.js",
     "dev:worker": "nodemon src/worker.js",
-    "test": "cross-env NODE_OPTIONS=--experimental-vm-modules jest"
+    "test": "npm run test:unit && npm run test:component && npm run test:integration",
+    "test:unit": "cross-env NODE_OPTIONS=--experimental-vm-modules jest tests/unit/ --passWithNoTests",
+    "test:integration": "cross-env NODE_OPTIONS=--experimental-vm-modules jest tests/integration/ --passWithNoTests",
+    "test:component": "cross-env NODE_OPTIONS=--experimental-vm-modules jest tests/component/ --passWithNoTests"
   },
   "dependencies": {
     "agenda": "^5.0.0",

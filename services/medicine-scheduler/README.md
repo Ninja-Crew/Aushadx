@@ -1,19 +1,33 @@
 # Medicine Scheduler
+
 Microservice for managing user medicine schedules and reminders.
 
 ## Setup
+
 1. Copy `.env.example` to `.env`. Ensure MongoDB is running.
 2. Run `npm install`
 3. Run `npm start`
 
 ## Docker
+
 ```bash
 docker build -t medicine-scheduler .
 docker run -p 3003:3003 medicine-scheduler
 ```
 
+## Testing
+
+```bash
+npm test
+```
+
+Reusable mock modules live in `tests/mocks`.
+Detailed positive and negative scenarios are documented in `TEST_SCENARIOS.md`.
+
 ## Push Notifications
+
 To enable FCM push notifications, this service requires a Firebase Admin service account key:
+
 1. Go to the **Firebase Console** -> **Project Settings** -> **Service accounts**
 2. Click **Generate new private key** and download the JSON file
 3. Rename the downloaded file to `service-account.json` and place it in the root of the `services/medicine-scheduler` directory.
