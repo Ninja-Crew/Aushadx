@@ -2,8 +2,7 @@ import sys
 import types
 import pytest
 from unittest.mock import MagicMock
-from langchain_core.messages import HumanMessage, AIMessage
-
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 # Ensure we test the real module, not the stub inserted by test_api.py.
 sys.modules.pop("agent.graph", None)
@@ -12,38 +11,73 @@ pytest.importorskip("langgraph.checkpoint.mongodb")
 
 from agent import graph as graph_module
 
-
 def test_graph_module_exports_compiled_graph():
     assert hasattr(graph_module, "graph")
     assert graph_module.graph is not None
 
-
-def test_call_model_returns_single_ai_message(monkeypatch):
-    fake_response = AIMessage(content="Test Response")
+def test_supervisor_routes_to_worker(monkeypatch):
     fake_llm = MagicMock()
-    fake_llm.invoke.return_value = fake_response
-
-    monkeypatch.setattr(graph_module, "llm_with_tools", fake_llm)
-
-    state = {"messages": [HumanMessage(content="hello")]}
-    result = graph_module.call_model(state, config={"configurable": {"thread_id": "u1"}})
-
+    fake_llm.invoke.return_value = AIMessage(
+        content="", 
+        tool_calls=[{"name": "route_to_worker", "args": {"worker_name": "Medical_Management"}, "id": "1"}]
+    )
+    
+    monkeypatch.setattr(graph_module, "supervisor_llm", fake_llm)
+    
+    state = {"messages": [HumanMessage(content="Schedule a reminder")]}
+    result = graph_module.supervisor_node(state, config={})
+    
     assert len(result["messages"]) == 1
-    assert result["messages"][0].content == "Test Response"
+    assert result["messages"][0].tool_calls[0]["name"] == "route_to_worker"
+    assert result["sender"] == "supervisor"
 
+def test_supervisor_answers_directly(monkeypatch):
+    fake_llm = MagicMock()
+    fake_llm.invoke.return_value = AIMessage(content="Hello! I am AushadX.")
+    monkeypatch.setattr(graph_module, "supervisor_llm", fake_llm)
+    
+    state = {"messages": [HumanMessage(content="hi")]}
+    result = graph_module.supervisor_node(state, config={})
+    
+    assert len(result["messages"]) == 1
+    assert result["messages"][0].content == "Hello! I am AushadX."
+    assert not result["messages"][0].tool_calls
+    assert result["sender"] == "supervisor"
 
-def test_call_model_prepends_system_prompt(monkeypatch):
-    captured = {}
+def test_supervisor_router_routes_to_tools():
+    state = {"messages": [AIMessage(content="", tool_calls=[{"name": "route_to_worker", "args": {"worker_name": "Medical_Management"}, "id": "1"}])]}
+    result = graph_module.supervisor_router(state)
+    assert result == "tools"
 
-    def _invoke(messages):
-        captured["messages"] = messages
-        return AIMessage(content="ok")
+def test_router_after_tool_routes_to_worker():
+    state = {
+        "messages": [
+            AIMessage(content="", tool_calls=[{"name": "route_to_worker", "args": {"worker_name": "Medical_Management"}, "id": "1"}]),
+            ToolMessage(content="Transferred to Medical_Management", tool_call_id="1", name="route_to_worker")
+        ]
+    }
+    result = graph_module.router_after_tool(state)
+    assert result == "Medical_Management"
 
-    fake_llm = types.SimpleNamespace(invoke=_invoke)
-    monkeypatch.setattr(graph_module, "llm_with_tools", fake_llm)
+def test_agent_node_factory():
+    fake_llm = MagicMock()
+    fake_llm.invoke.return_value = AIMessage(content="Worker response")
+    
+    node = graph_module.create_agent_node(fake_llm, [], "Test Prompt", "Test_Agent")
+    
+    state = {"messages": [HumanMessage(content="hello")]}
+    result = node(state, config={})
+    
+    assert len(result["messages"]) == 1
+    assert result["messages"][0].content == "Worker response"
+    assert result["sender"] == "Test_Agent"
 
-    state = {"messages": [HumanMessage(content="schedule reminder")]} 
-    graph_module.call_model(state, config={"configurable": {"thread_id": "u1"}})
+def test_agent_router_routes_to_tools_on_tool_calls():
+    state = {"messages": [AIMessage(content="", tool_calls=[{"name": "test_tool", "args": {}, "id": "1"}])]}
+    result = graph_module.agent_router(state)
+    assert result == "tools"
 
-    assert captured["messages"][0].content.startswith("You are AushadX")
-    assert captured["messages"][1].content == "schedule reminder"
+def test_agent_router_routes_to_supervisor_when_done():
+    state = {"messages": [AIMessage(content="Done")]}
+    result = graph_module.agent_router(state)
+    assert result == "supervisor"

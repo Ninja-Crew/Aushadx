@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-async def test_agent():
+async def run_agent():
     print("Starting Agent Test...")
     try:
         inputs = {"messages": [HumanMessage(content="Hello, who are you?")]}
@@ -24,4 +24,4 @@ async def test_agent():
         print(f"Test Failed: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(test_agent())
+    asyncio.run(run_agent())

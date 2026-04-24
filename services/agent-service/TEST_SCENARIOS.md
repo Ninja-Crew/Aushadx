@@ -16,11 +16,14 @@ Shared test fixtures and helper configuration are separated under:
 
 ### `tests/unit/test_graph.py`
 
-1. `should_continue` returns `END` for plain AI response.
-2. `should_continue` routes to `tools` node for standard tool call.
-3. `should_continue` routes to `human_node` for explicit human-input tool call.
-4. `call_model` returns single AI message output.
-5. `human_input_node` returns empty message delta.
+1. `test_graph_module_exports_compiled_graph` ensures graph compiles.
+2. `test_supervisor_routes_to_worker` ensures supervisor correctly issues `route_to_worker` tool calls.
+3. `test_supervisor_answers_directly` ensures supervisor directly answers general questions without issuing tool calls.
+4. `test_supervisor_router_routes_to_tools` validates routing to `tools` node when supervisor issues a tool call.
+5. `test_router_after_tool_routes_to_worker` validates extraction of worker name from routing tool calls and proper handoff.
+6. `test_agent_node_factory` ensures worker agents correctly return their responses tagged with their sender ID.
+7. `test_agent_router_routes_to_tools_on_tool_calls` validates routing to `tools` node when worker returns tool calls.
+8. `test_agent_router_routes_to_supervisor_when_done` validates routing back to `supervisor` when worker finishes its task.
 
 ### `tests/unit/test_tools.py`
 
