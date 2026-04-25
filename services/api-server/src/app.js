@@ -91,11 +91,12 @@ const injectUserParam = (req, res, next) => {
 
 app.use(cors());
 app.use(morgan("combined"));
-app.use(apiLimiter);
 
 app.get("/health", (_req, res) =>
   res.status(200).json({ status: "ok", role: "gateway" })
 );
+
+app.use(apiLimiter);
 
 /* ================================
    PUBLIC ROUTES

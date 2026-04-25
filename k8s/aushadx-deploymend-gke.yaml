@@ -1,0 +1,849 @@
+# ============================================================
+# AushadX – Kubernetes Manifests for GKE
+# Services: mongodb, api-server, profile-manager,
+#            medicine-analyzer, medicine-scheduler, agent-service
+#
+# Registry : asia-south1-docker.pkg.dev/aushadx-489507/aushadx
+# Project  : aushadx-489507
+# Region   : asia-south1
+#
+# Auth     : Workload Identity (no JSON key files)
+#   aushadx-agent        → aushadx-vertex@aushadx-489507    (Vertex AI)
+#   aushadx-firebase-sa  → aushadx-firebase@<FIREBASE_PROJECT> (Firebase)
+#
+# Secrets  : managed externally via `kubectl create secret`
+#            (do NOT store secret values in this file)
+# ============================================================
+
+---
+# ─── Namespace ───────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aushadx
+
+---
+# ─── Service Account (agent-service / medicine-analyzer → Vertex AI) ─
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aushadx-agent
+  namespace: aushadx
+  annotations:
+    iam.gke.io/gcp-service-account: aushadx-vertex@aushadx-489507.iam.gserviceaccount.com
+
+---
+# ─── Service Account (medicine-scheduler → Firebase) ─────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aushadx-firebase-sa
+  namespace: aushadx
+  annotations:
+    iam.gke.io/gcp-service-account: aushadx-firebase@aushadx-99a97.iam.gserviceaccount.com
+
+---
+# ════════════════════════════════════════════════════════════
+# MongoDB – PVC, StatefulSet, Service
+# ════════════════════════════════════════════════════════════
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-pvc
+  namespace: aushadx
+spec:
+  storageClassName: standard-rwo   # GKE managed disk (replaces Minikube default)
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: aushadx
+spec:
+  serviceName: mongodb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+        - name: mongodb
+          image: mongo:7
+          ports:
+            - containerPort: 27017
+          env:
+            - name: MONGO_INITDB_DATABASE
+              value: aushadx
+          volumeMounts:
+            - name: mongodb-data
+              mountPath: /data/db
+          readinessProbe:
+            exec:
+              command:
+                - mongosh
+                - --eval
+                - "db.adminCommand('ping')"
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - mongosh
+                - --eval
+                - "db.adminCommand('ping')"
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+      volumes:
+        - name: mongodb-data
+          persistentVolumeClaim:
+            claimName: mongodb-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: aushadx
+spec:
+  clusterIP: None  # Headless – StatefulSet DNS: mongodb.aushadx.svc.cluster.local
+  selector:
+    app: mongodb
+  ports:
+    - port: 27017
+      targetPort: 27017
+
+---
+# ════════════════════════════════════════════════════════════
+# profile-manager (port 3001)
+# ════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: profile-manager
+  namespace: aushadx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: profile-manager
+  template:
+    metadata:
+      labels:
+        app: profile-manager
+    spec:
+      containers:
+        - name: profile-manager
+          image: asia-south1-docker.pkg.dev/aushadx-489507/aushadx/profile-manager:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3001
+          env:
+            - name: PORT
+              value: "3001"
+            - name: NODE_ENV
+              value: "production"
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: MONGO_URI
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: JWT_SECRET
+            - name: JWT_ACCESS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: JWT_ACCESS_SECRET
+            - name: JWT_REFRESH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: JWT_REFRESH_SECRET
+            - name: JWT_ACCESS_EXPIRES_IN
+              value: "15m"
+            - name: JWT_REFRESH_EXPIRES_IN
+              value: "7d"
+            - name: OTP_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: OTP_JWT_SECRET
+            - name: OTP_EXPIRES_IN
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: OTP_EXPIRES_IN
+            - name: SENDGRID_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: SENDGRID_API_KEY
+            - name: SENDGRID_FROM_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: SENDGRID_FROM_EMAIL
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: profile-manager
+  namespace: aushadx
+spec:
+  type: ClusterIP
+  selector:
+    app: profile-manager
+  ports:
+    - port: 3001
+      targetPort: 3001
+
+---
+# ════════════════════════════════════════════════════════════
+# medicine-analyzer (port 3002)
+# Auth: Workload Identity via aushadx-agent SA (no key file)
+# ════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: medicine-analyzer
+  namespace: aushadx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: medicine-analyzer
+  template:
+    metadata:
+      labels:
+        app: medicine-analyzer
+    spec:
+      serviceAccountName: aushadx-agent
+      containers:
+        - name: medicine-analyzer
+          image: asia-south1-docker.pkg.dev/aushadx-489507/aushadx/medicine-analyzer:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3002
+          env:
+            - name: PORT
+              value: "3002"
+            - name: NODE_ENV
+              value: "production"
+            - name: LLM_PROVIDER
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: LLM_PROVIDER
+            - name: LLM_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: LLM_MODEL
+            - name: LOG_LEVEL
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: LOG_LEVEL
+            - name: PROFILE_SERVICE_HOST
+              value: "profile-manager"
+            - name: PROFILE_SERVICE_PORT
+              value: "3001"
+            - name: PROFILE_SERVICE_URL
+              value: "http://$(PROFILE_SERVICE_HOST):$(PROFILE_SERVICE_PORT)"
+            - name: PROPAGATE_AUTH
+              value: "true"
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GEMINI_API_KEY
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: OPENAI_API_KEY
+            - name: PINECONE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: PINECONE_API_KEY
+            - name: PINECONE_INDEX
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: PINECONE_INDEX
+            - name: PINECONE_INDEX_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: PINECONE_INDEX_HOST
+            - name: PINECONE_NAMESPACE
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: PINECONE_NAMESPACE
+            - name: GEMINI_PROVIDER
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GEMINI_PROVIDER
+            - name: VERTEX_PROJECT
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: VERTEX_PROJECT
+            - name: VERTEX_LOCATION
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: VERTEX_LOCATION
+          # No GOOGLE_APPLICATION_CREDENTIALS – Workload Identity injects credentials
+          # No vertex-ai-key volume – Workload Identity replaces the JSON key file
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: medicine-analyzer
+  namespace: aushadx
+spec:
+  type: ClusterIP
+  selector:
+    app: medicine-analyzer
+  ports:
+    - port: 3002
+      targetPort: 3002
+
+---
+# ════════════════════════════════════════════════════════════
+# medicine-scheduler (port 3003)
+# Auth: Workload Identity via aushadx-firebase-sa (no key file)
+# ════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: medicine-scheduler
+  namespace: aushadx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: medicine-scheduler
+  template:
+    metadata:
+      labels:
+        app: medicine-scheduler
+    spec:
+      serviceAccountName: aushadx-firebase-sa
+      containers:
+        - name: medicine-scheduler
+          image: asia-south1-docker.pkg.dev/aushadx-489507/aushadx/medicine-scheduler:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3003
+          env:
+            - name: PORT
+              value: "3003"
+            - name: NODE_ENV
+              value: "production"
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: MONGO_URI
+          # No GOOGLE_APPLICATION_CREDENTIALS – Workload Identity injects credentials
+          # No firebase-key volume – Workload Identity replaces the JSON key file
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: medicine-scheduler
+  namespace: aushadx
+spec:
+  type: ClusterIP
+  selector:
+    app: medicine-scheduler
+  ports:
+    - port: 3003
+      targetPort: 3003
+
+---
+# ════════════════════════════════════════════════════════════
+# medicine-scheduler-worker (Daemon)
+# Auth: Workload Identity via aushadx-firebase-sa (no key file)
+# ════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: medicine-scheduler-worker
+  namespace: aushadx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: medicine-scheduler-worker
+  template:
+    metadata:
+      labels:
+        app: medicine-scheduler-worker
+    spec:
+      serviceAccountName: aushadx-firebase-sa
+      containers:
+        - name: medicine-scheduler-worker
+          image: asia-south1-docker.pkg.dev/aushadx-489507/aushadx/medicine-scheduler:latest
+          imagePullPolicy: Always
+          command: ["npm", "run", "worker"]
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: MONGO_URI
+            - name: PROFILE_SERVICE_URL
+              value: "http://profile-manager:3001"
+          # No GOOGLE_APPLICATION_CREDENTIALS – Workload Identity injects credentials
+          # No firebase-key volume – Workload Identity replaces the JSON key file
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+
+---
+# ════════════════════════════════════════════════════════════
+# agent-service (port 3004, Python)
+# Auth: Workload Identity via aushadx-agent SA (no key file)
+# ════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-service
+  namespace: aushadx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent-service
+  template:
+    metadata:
+      labels:
+        app: agent-service
+    spec:
+      serviceAccountName: aushadx-agent
+      containers:
+        - name: agent-service
+          image: asia-south1-docker.pkg.dev/aushadx-489507/aushadx/agent-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3004
+          env:
+            - name: PORT
+              value: "3004"
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: MONGO_URI
+            # ── service URLs ────────────────────────────────
+            - name: PROFILE_SERVICE_HOST
+              value: "profile-manager"
+            - name: PROFILE_SERVICE_PORT
+              value: "3001"
+            - name: PROFILE_SERVICE_URL
+              value: "http://$(PROFILE_SERVICE_HOST):$(PROFILE_SERVICE_PORT)"
+            - name: PROFILE_MANAGER_URL
+              value: "http://$(PROFILE_SERVICE_HOST):$(PROFILE_SERVICE_PORT)"
+            - name: MEDICINE_ANALYZER_HOST
+              value: "medicine-analyzer"
+            - name: MEDICINE_ANALYZER_PORT
+              value: "3002"
+            - name: MEDICINE_ANALYZER_URL
+              value: "http://$(MEDICINE_ANALYZER_HOST):$(MEDICINE_ANALYZER_PORT)"
+            - name: MEDICINE_SCHEDULER_HOST
+              value: "medicine-scheduler"
+            - name: MEDICINE_SCHEDULER_PORT
+              value: "3003"
+            - name: MEDICINE_SCHEDULER_URL
+              value: "http://$(MEDICINE_SCHEDULER_HOST):$(MEDICINE_SCHEDULER_PORT)"
+            # ── credentials ─────────────────────────────────
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GEMINI_API_KEY
+            - name: GEMINI_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GEMINI_MODEL
+            - name: GEMINI_PROVIDER
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: GEMINI_PROVIDER
+            - name: VERTEX_PROJECT
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: VERTEX_PROJECT
+            - name: VERTEX_LOCATION
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: VERTEX_LOCATION
+          # No GOOGLE_APPLICATION_CREDENTIALS – Workload Identity injects credentials
+          # No vertex-ai-key volume – Workload Identity replaces the JSON key file
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-service
+  namespace: aushadx
+spec:
+  type: ClusterIP
+  selector:
+    app: agent-service
+  ports:
+    - port: 3004
+      targetPort: 3004
+
+---
+# ════════════════════════════════════════════════════════════
+# api-server / API Gateway (port 3000) – GCP LoadBalancer
+# ════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-server
+  namespace: aushadx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-server
+  template:
+    metadata:
+      labels:
+        app: api-server
+    spec:
+      containers:
+        - name: api-server
+          image: asia-south1-docker.pkg.dev/aushadx-489507/aushadx/api-server:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: NODE_ENV
+              value: "production"
+            # ── profile-manager ────────────────────────────
+            - name: PROFILE_SERVICE_HOST
+              value: "profile-manager"
+            - name: PROFILE_SERVICE_PORT
+              value: "3001"
+            - name: PROFILE_SERVICE_URL
+              value: "http://$(PROFILE_SERVICE_HOST):$(PROFILE_SERVICE_PORT)"
+            - name: JWKS_URI
+              value: "http://$(PROFILE_SERVICE_HOST):$(PROFILE_SERVICE_PORT)/.well-known/jwks.json"
+            # ── medicine-scheduler ─────────────────────────
+            - name: MEDICINE_SCHEDULER_HOST
+              value: "medicine-scheduler"
+            - name: MEDICINE_SCHEDULER_PORT
+              value: "3003"
+            - name: MEDICINE_SCHEDULER_URL
+              value: "http://$(MEDICINE_SCHEDULER_HOST):$(MEDICINE_SCHEDULER_PORT)"
+            # ── medicine-analyzer ──────────────────────────
+            - name: MEDICINE_ANALYZER_HOST
+              value: "medicine-analyzer"
+            - name: MEDICINE_ANALYZER_PORT
+              value: "3002"
+            - name: MEDICINE_ANALYZER_URL
+              value: "http://$(MEDICINE_ANALYZER_HOST):$(MEDICINE_ANALYZER_PORT)"
+            # ── agent-service (WebSocket) ──────────────────
+            - name: AGENT_SERVICE_HOST
+              value: "agent-service"
+            - name: AGENT_SERVICE_PORT
+              value: "3004"
+            - name: AGENT_SERVICE_URL
+              value: "ws://$(AGENT_SERVICE_HOST):$(AGENT_SERVICE_PORT)"
+            # ── Stability: ignore proxy errors so pod stays up ─
+            - name: NODE_ENV
+              value: "production"
+            # ── Timeouts ──────────────────────────────────
+            - name: TIMEOUT_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: TIMEOUT_AUTH
+            - name: TIMEOUT_PROFILE
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: TIMEOUT_PROFILE
+            - name: TIMEOUT_REMINDERS
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: TIMEOUT_REMINDERS
+            - name: TIMEOUT_ANALYZE
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: TIMEOUT_ANALYZE
+            - name: TIMEOUT_AGENT
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: TIMEOUT_AGENT
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-server
+  namespace: aushadx
+spec:
+  type: LoadBalancer          # GCP provisions an external IP automatically
+  selector:
+    app: api-server
+  ports:
+    - port: 80                # External port clients connect to
+      targetPort: 3000        # Internal container port
+
+---
+# ════════════════════════════════════════════════════════════
+# HorizontalPodAutoscalers
+# Scales stateless services based on CPU ≥ 70% utilisation.
+# Prerequisites:
+#   1. Metrics Server must be enabled on the cluster:
+#      gcloud container clusters update aushadx-cluster --enable-autoscaling \
+#        --min-nodes=1 --max-nodes=5 --region=asia-south1
+#   2. Every Deployment below MUST have resource requests set (done above).
+# ════════════════════════════════════════════════════════════
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-server-hpa
+  namespace: aushadx
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-server
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: profile-manager-hpa
+  namespace: aushadx
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: profile-manager
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: medicine-analyzer-hpa
+  namespace: aushadx
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: medicine-analyzer
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: agent-service-hpa
+  namespace: aushadx
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: agent-service
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: medicine-scheduler-hpa
+  namespace: aushadx
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: medicine-scheduler
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
