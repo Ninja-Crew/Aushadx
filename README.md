@@ -23,20 +23,26 @@ Whether you're managing a complex medication schedule, tracking health trends, o
 ## 🌟 Key Features
 
 ### 📅 **Smart Medication Scheduling**
+
 Never miss a dose again. Our robust scheduler handles complex frequencies:
+
 - **Flexible Timing**: Every X hours, specific days, or X times daily.
 - **Intelligent Tracking**: Logs missed doses and adheres to strict end-date policies.
 - **Reliable Notifications**: Push notifications ensure you're always alerted on time.
 
 ### 🧠 **AI-Powered Health Analysis**
+
 Transform your medical data into actionable insights:
+
 - **RAG-Enhanced Q&A**: Upload medical reports (PDF/Text) and ask questions. Our **Retrieval-Augmented Generation** engine retrieves the exact context to give you accurate answers.
 - **Gemini Integration**: Powered by Google's Gemini Pro for state-of-the-art medical reasoning.
 - **Personalized Analytics**: Get dietary advice, risk assessments, and exercise plans tailored to your specific profile.
 - **Conversational AI**: Interact with our Agent Service via WebSocket for a seamless health assistant experience.
 
 ### 🛡️ **Secure Profile Management**
+
 Your health data is sensitive, and we treat it that way:
+
 - **Centralized Auth**: Secure JWT-based authentication across all services.
 - **Encrypted Data**: Standards-compliant password hashing and secure token management.
 - **Profile Portability**: Seamlessly syncs user context across the scheduler and analyzer services.
@@ -52,7 +58,7 @@ graph TD
     %% Clients & Gateway
     User(["📱 Mobile Client <br/> (React Native)"])
     Gateway["🛡️ API Gateway"]
-    
+
     %% Microservices
     subgraph Microservices
         Profile["👤 Profile Manager"]
@@ -67,7 +73,7 @@ graph TD
 
     %% External Flow
     User <==>|"REST & WS Requests"| Gateway
-    
+
     %% API Gateway Services
     Gateway <-.->|"Auth & Profile API"| Profile
     Gateway <-.->|"Analysis API"| Analyzer
@@ -90,16 +96,17 @@ graph TD
 
 The **API Gateway (Port 3000)** securely proxies and routes all cross-origin requests to the internal microservices while performing global JWT token validation and injecting headers.
 
-| Gateway Route | Target Microservice | Internal Port | Key Responsibilities & Endpoints |
-| :--- | :--- | :--- | :--- |
-| `/auth` | **Profile Manager** | `3001` | *Public:* `/signup`, `/login`, `/refresh`, OTP & Password Resets. |
-| `/profile` | **Profile Manager** | `3001` | *Protected:* Profile CRUD, `/medical-info/:uid`, FCM tokens. |
-| `/analyze` | **Medicine Analyzer** | `3002` | *Protected:* Analyzes medical files (Proxied to `/api/analyze/:uid`). |
-| `/reminders` | **Medicine Scheduler** | `3003` | *Protected:* Schedule CRUD, list pending/missed, snooze, clear dosings. |
-| `/chats` | **Agent Service** | `3004` | *Protected:* HTTP fetches for chat history, sending messages, deletions. |
-| `/ws` | **Agent Service** | `3004` | *WebSockets:* Bi-directional real-time medical assistant AI streaming via WS. |
+| Gateway Route | Target Microservice    | Internal Port | Key Responsibilities & Endpoints                                              |
+| :------------ | :--------------------- | :------------ | :---------------------------------------------------------------------------- |
+| `/auth`       | **Profile Manager**    | `3001`        | _Public:_ `/signup`, `/login`, `/refresh`, OTP & Password Resets.             |
+| `/profile`    | **Profile Manager**    | `3001`        | _Protected:_ Profile CRUD, `/medical-info/:uid`, FCM tokens.                  |
+| `/analyze`    | **Medicine Analyzer**  | `3002`        | _Protected:_ Analyzes medical files (Proxied to `/api/analyze/:uid`).         |
+| `/reminders`  | **Medicine Scheduler** | `3003`        | _Protected:_ Schedule CRUD, list pending/missed, snooze, clear dosings.       |
+| `/chats`      | **Agent Service**      | `3004`        | _Protected:_ HTTP fetches for chat history, sending messages, deletions.      |
+| `/ws`         | **Agent Service**      | `3004`        | _WebSockets:_ Bi-directional real-time medical assistant AI streaming via WS. |
 
 ### Microservices Details
+
 - **`api-server`**: Main entry point handling API rate-limiting, proxy routing, and Auth Header injection (`X-User-Id`). Supported timeouts configured individually per proxied route.
 - **`profile-manager`**: Centralized user data handling and secure JWT generation/verification natively in MongoDB.
 - **`medicine-analyzer`**: AI service utilizing models to parse, vectorize, and analyze user prescription/report data.
@@ -127,6 +134,7 @@ AushadX is designed to run natively on **Docker Desktop's built-in Kubernetes**.
 👉 **[Click here for the complete Kubernetes Deployment Guide](k8s/DEPLOYMENT.md)**
 
 The step-by-step deployment guide covers:
+
 - Switching to the correct Kubernetes context
 - Building local images without needing an external registry
 - Safely configuring environment variables & secrets via Kubernetes manifestations

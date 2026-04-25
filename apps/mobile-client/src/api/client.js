@@ -6,7 +6,8 @@ import { getToken, getRefreshToken, saveToken, removeToken } from '../utils/stor
 import { navigate, replace, navigationRef } from '../navigation/navigationRef';
 
 // Use Expo config for environment variables
-const BASE_URL = Constants.expoConfig?.extra?.baseUrl || 'http://192.168.0.107:30000';
+const BASE_URL = Constants.expoConfig?.extra?.baseUrl || 'http://34.47.155.145';
+
 
 const getBaseUrl = () => {
   if (Platform.OS === 'android' && (BASE_URL.includes('localhost') || BASE_URL.includes('127.0.0.1'))) {

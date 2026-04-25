@@ -4,6 +4,9 @@ import {
   analyzeInput,
   profileResponse,
   successfulAnalysis,
+  successfulExtraction,
+  multimodalInput,
+  multiMedicineExtraction,
 } from "../mocks/fixtures.js";
 import { testEnv } from "../mocks/env.js";
 import { createLlmMock, createRagMock } from "../mocks/services.js";
@@ -31,7 +34,13 @@ describe("Medicine Analyzer API", () => {
     jest.clearAllMocks();
     mockFetch.mockReset();
     ragMock.search.mockResolvedValue([]);
-    llmMock.callStructured.mockResolvedValue(successfulAnalysis);
+    llmMock.callStructured.mockImplementation(async (prompt, schema) => {
+      // If the schema has medicines array, it's Stage 1
+      if (schema.shape && schema.shape.medicines) {
+        return successfulExtraction;
+      }
+      return successfulAnalysis;
+    });
     llmMock.callGeminiStructured.mockResolvedValue(successfulAnalysis);
   });
 
@@ -47,10 +56,57 @@ describe("Medicine Analyzer API", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.analysis.drug_name).toBe("Mock Drug");
+    expect(res.body.analyses).toBeDefined();
+    expect(res.body.analyses[0].drug_name).toBe("Mock Drug");
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(ragMock.search).toHaveBeenCalledWith("Aspirin 100mg");
-    expect(llmMock.callStructured).toHaveBeenCalled();
+    expect(ragMock.search).toHaveBeenCalledWith("Mock Drug Aspirin 100mg");
+    expect(llmMock.callStructured).toHaveBeenCalledTimes(2); // Stage 1 and Stage 2
+  });
+
+  it("POST /api/analyze/:user_id successfully processes multimodal input with image", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => profileResponse,
+    });
+
+    const res = await request(app)
+      .post("/api/analyze/user123")
+      .send(multimodalInput);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    
+    // First call (extraction) should receive image
+    expect(llmMock.callStructured).toHaveBeenNthCalledWith(
+      1,
+      expect.any(String),
+      expect.any(Object),
+      expect.objectContaining({ image: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" })
+    );
+  });
+
+  it("POST /api/analyze/:user_id successfully batches multiple medicines", async () => {
+    // Mock Stage 1 to return 4 medicines
+    llmMock.callStructured.mockImplementation(async (prompt, schema) => {
+      if (schema.shape && schema.shape.medicines) {
+        return multiMedicineExtraction;
+      }
+      return successfulAnalysis;
+    });
+
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => profileResponse,
+    });
+
+    const res = await request(app)
+      .post("/api/analyze/user123")
+      .send(analyzeInput);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.analyses.length).toBe(4); // Should have processed all 4 medicines
+    expect(llmMock.callStructured).toHaveBeenCalledTimes(5); // 1 extraction + 4 individual analyses
   });
 
   it("returns 400 when medicine_data is missing", async () => {
@@ -60,10 +116,11 @@ describe("Medicine Analyzer API", () => {
   });
 
   it("returns 422 when llm flags payload as non-medicine label", async () => {
-    llmMock.callStructured.mockResolvedValue({
-      is_medicine_label: false,
-      drug_name: null,
-      recommendations: [],
+    llmMock.callStructured.mockImplementation(async () => {
+      return {
+        is_medicine_related: false,
+        medicines: [],
+      };
     });
     mockFetch.mockResolvedValueOnce({
       ok: true,

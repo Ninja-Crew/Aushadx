@@ -2,7 +2,7 @@
   "expo": {
     "name": "AushadX",
     "slug": "mobile-client",
-    "version": "1.0.0",
+    "version": "1.1.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -61,10 +61,7 @@
     ],
     "extra": {
       "googleMapsApiKey": "AIzaSyD8HCvRVMc3G_9fdrN6u636rVRLE2rHdnE",
-      "baseUrl": "https://sumptuous-mauro-scribbly.ngrok-free.dev",
-      "apiHeaders": {
-        "ngrok-skip-browser-warning": "true"
-      },
+      "baseUrl": "http://34.47.155.145",
       "eas": {
         "projectId": "a9976a73-9a13-4044-8ba9-4824bd2deb38"
       }

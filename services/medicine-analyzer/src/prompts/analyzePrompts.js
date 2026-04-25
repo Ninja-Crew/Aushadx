@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+export const medicineListSchema = z.object({
+  is_medicine_related: z.boolean(),
+  medicines: z.array(z.record(z.any())).default([])
+});
+
 export const medicineSchema = z.object({
   is_medicine_label: z.boolean(),
   drug_name: z.string().nullable(),
@@ -23,7 +28,31 @@ export const medicineSchema = z.object({
     level: z.enum(["high", "medium", "low"]),
     rationale: z.string().nullable()
   }).nullable(),
-  references: z.array(z.string()).default([])
+  references: z.array(z.string()).default([]),
+  extracted_schedule: z.object({
+    dosage: z.string().nullable(),
+    frequency: z.enum([
+      'ONCE',
+      'DAILY',
+      'X_TIMES_DAILY',
+      'EVERY_X_HOURS',
+      'EVERY_X_MINUTES',
+      'SPECIFIC_WEEK_DAYS',
+      'SPECIFIC_DAYS_OF_MONTH',
+      'UNKNOWN'
+    ]).nullable(),
+    frequencyValue: z.number().nullable(),
+    duration: z.enum([
+      'SINGLE_DAY',
+      'FOR_X_DAYS',
+      'FOR_X_WEEKS',
+      'FOR_X_MONTHS',
+      'UNTIL_DATE',
+      'CONTINUOUS',
+      'UNKNOWN'
+    ]).nullable(),
+    durationValue: z.number().nullable()
+  }).nullable()
 });
 
 export function buildPrompt(user_data, medicalInfo = null, ragContext = null) {
@@ -70,10 +99,10 @@ Medical Info:
 ${medicalInfo || "None provided"}
 
 ----------------------
-MEDICINE LABEL OCR
+MEDICINE SPECIFIC DATA (From OCR/Image)
 ----------------------
 
-${user_data.ocr_text || user_data.text}
+${JSON.stringify(user_data, null, 2)}
 
 ----------------------
 SPECIAL SAFETY RULE
@@ -136,8 +165,28 @@ The JSON MUST strictly match this structure:
       "source": "string",
       "context_index": number
     }
-  ]
+  ],
+
+  "extracted_schedule": {
+    "dosage": "string (e.g. '1 tablet', '5ml') or null",
+    "frequency": "enum value from [ONCE, DAILY, X_TIMES_DAILY, EVERY_X_HOURS, EVERY_X_MINUTES, SPECIFIC_WEEK_DAYS, SPECIFIC_DAYS_OF_MONTH, UNKNOWN] or null",
+    "frequencyValue": "number or null",
+    "duration": "enum value from [SINGLE_DAY, FOR_X_DAYS, FOR_X_WEEKS, FOR_X_MONTHS, UNTIL_DATE, CONTINUOUS, UNKNOWN] or null",
+    "durationValue": "number or null"
+  }
 }
+
+----------------------
+SCHEDULING EXTRACTION RULES
+----------------------
+1. If the OCR or Image provides dosing instructions (e.g., "Take 1 pill every 6 hours for 5 days"):
+   - Set "dosage" to the exact amount to take at one time (e.g., "1 pill"). Do NOT include the frequency or duration text here.
+   - If it says "every X hours", MUST set frequency to "EVERY_X_HOURS" and frequencyValue to X (e.g. 6). Do NOT use "DAILY" or "X_TIMES_DAILY" for this.
+   - If it says "X times a day", set frequency to "X_TIMES_DAILY" and frequencyValue to X.
+   - If it says "once a day", set frequency to "DAILY".
+   - Set "duration" appropriately (e.g., "FOR_X_DAYS") and "durationValue" to the max number (e.g., if "3-5 days", use 5).
+2. Do NOT invent or include specific times of day.
+3. If instructions are vague, use "UNKNOWN" or null where appropriate, but try to provide useful defaults.
 
 ----------------------
 STRICT OUTPUT RULES
@@ -151,6 +200,61 @@ STRICT OUTPUT RULES
 - Do not rename fields
 - Do not add fields
 - Do not omit fields
+- Ensure valid JSON syntax
+
+Return the JSON object now.
+`;
+}
+
+export function buildMedicineExtractionPrompt(ocr_text) {
+  return `
+You are a clinical medicine extraction assistant.
+
+Your job is to identify and extract a list of distinct medicines from the provided OCR text and the uploaded image (prescription or medicine label).
+
+Follow these rules strictly.
+
+----------------------
+GENERAL RULES
+----------------------
+1. Determine if the provided text or image contains any references to medicines, drugs, or pharmaceutical products. If so, set \`is_medicine_related\` to \`true\`. If not, set it to \`false\`.
+2. CRITICAL: The OCR text may be incomplete or contain errors, especially with handwritten doctor prescriptions. You must CAREFULLY EXAMINE the uploaded image alongside the OCR text.
+3. If \`is_medicine_related\` is \`true\`, extract EVERY distinct medicine mentioned in both the OCR text and the image. If you spot a medicine in the image (like doctor handwriting) that the OCR missed, YOU MUST INCLUDE IT.
+4. For each medicine, provide its \`medicine_name\` and a \`context_text\`.
+5. The \`context_text\` should include the specific sentences, bullet points, handwritten notes, or sections from the original OCR text/image that refer to this medicine, including dosage, side effects, or instructions. This will be used in a later step to analyze the medicine in detail.
+
+----------------------
+MEDICINE LABEL OCR / IMAGE CONTEXT
+----------------------
+
+${ocr_text}
+
+----------------------
+OUTPUT REQUIREMENTS
+----------------------
+
+Return ONLY a valid JSON object.
+
+The JSON MUST strictly match this structure:
+
+{
+  "is_medicine_related": true | false,
+  "medicines": [
+    {
+      "medicine_name": "string",
+      "context_text": "string"
+    }
+  ]
+}
+
+----------------------
+STRICT OUTPUT RULES
+----------------------
+- Return ONLY JSON
+- No markdown
+- No explanations
+- No comments
+- No additional text
 - Ensure valid JSON syntax
 
 Return the JSON object now.

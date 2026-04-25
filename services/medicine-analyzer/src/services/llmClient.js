@@ -5,7 +5,7 @@
  * Supported values: "gemini" (default), "openai"
  *
  * Every provider exports a single async function:
- *   callStructured(prompt, zodSchema, retries) → Promise<object>
+ *   callStructured(prompt, zodSchema, options, retries) → Promise<object>
  */
 
 import logger from "../config/logger.js";
@@ -46,10 +46,19 @@ async function getProvider() {
  * Call the configured LLM with a Zod schema for structured output.
  * @param {string} prompt
  * @param {import("zod").ZodTypeAny} zodSchema
- * @param {number} [retries=3]
+ * @param {object|number} [options={}] Options object (can contain image_base64, retries) or legacy retries number.
  * @returns {Promise<object>}
  */
-async function callStructured(prompt, zodSchema, retries = 3) {
+async function callStructured(prompt, zodSchema, options = {}) {
+  let retries = 3;
+  let providerOptions = {};
+
+  if (typeof options === 'number') {
+    retries = options;
+  } else if (options && typeof options === 'object') {
+    retries = options.retries !== undefined ? options.retries : 3;
+    providerOptions = options;
+  }
   if (process.env.MOCK_LLM === "true") {
     logger.info("[MOCK] Returning mock LLM response");
     return MOCK_RESPONSE;
@@ -57,7 +66,7 @@ async function callStructured(prompt, zodSchema, retries = 3) {
 
   const provider = await getProvider();
   logger.info(`Using LLM provider: ${env.LLM_PROVIDER || "gemini"}`);
-  return provider.callStructured(prompt, zodSchema, retries);
+  return provider.callStructured(prompt, zodSchema, providerOptions, retries);
 }
 
 // Backwards-compatible alias

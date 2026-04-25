@@ -182,6 +182,14 @@ const agentProxy = createProxyMiddleware({
   onProxyReq: injectUserHeader,
   proxyTimeout: TIMEOUT_AGENT,
   timeout: TIMEOUT_AGENT,
+  on: {
+    error: (err, req, res) => {
+      console.error("[agentProxy] HTTP proxy error:", err.message);
+      if (!res.headersSent) {
+        res.status(502).json({ error: "Agent service unavailable", details: err.message });
+      }
+    },
+  },
 });
 
 app.get("/chats", verifyToken, (req, res, next) => {
@@ -228,6 +236,15 @@ const wsProxy = createProxyServer({
   changeOrigin: true,
   proxyTimeout: TIMEOUT_AGENT,
   timeout: TIMEOUT_AGENT,
+});
+
+// CRITICAL: without this, ECONNREFUSED on the upstream crashes the Node process
+wsProxy.on("error", (err, req, socket) => {
+  console.error("[wsProxy] WebSocket proxy error:", err.message);
+  if (socket && !socket.destroyed) {
+    socket.write("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+    socket.destroy();
+  }
 });
 
 server.on("upgrade", async (req, socket, head) => {

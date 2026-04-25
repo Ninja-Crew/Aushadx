@@ -12,10 +12,18 @@ process.env.PINECONE_INDEX_HOST = "dummy";
 
 // Mock the LLM and RAG clients for a predictable integration test
 const mockLlmClient = {
-  callStructured: jest.fn().mockResolvedValue({
-    is_medicine_label: true,
-    drug_name: "Integration Test Drug",
-    recommendations: ["Take with water"],
+  callStructured: jest.fn().mockImplementation(async (prompt, schema) => {
+    if (schema.shape && schema.shape.medicines) {
+      return {
+        is_medicine_related: true,
+        medicines: [{ medicine_name: "Integration Test Drug", context_text: "Test medicine text" }]
+      };
+    }
+    return {
+      is_medicine_label: true,
+      drug_name: "Integration Test Drug",
+      recommendations: ["Take with water"],
+    };
   }),
   callGeminiStructured: jest.fn().mockResolvedValue({
     is_medicine_label: true,
@@ -84,7 +92,8 @@ describe("Medicine Analyzer System Integration", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.analysis.drug_name).toBe("Integration Test Drug");
-    expect(mockLlmClient.callStructured).toHaveBeenCalled();
+    expect(res.body.analyses).toBeDefined();
+    expect(res.body.analyses[0].drug_name).toBe("Integration Test Drug");
+    expect(mockLlmClient.callStructured).toHaveBeenCalledTimes(2);
   });
 });
