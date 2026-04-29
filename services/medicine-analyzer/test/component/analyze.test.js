@@ -47,7 +47,10 @@ describe("Medicine Analyzer API", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.success).toBe(true);
+    expect(res.body.input_type).toBe("medicine_label");
     expect(res.body.analysis.drug_name).toBe("Mock Drug");
+    expect(res.body.medicines).toBeInstanceOf(Array);
+    expect(res.body.medicines[0].drug_name).toBe("Mock Drug");
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(ragMock.search).toHaveBeenCalledWith("Aspirin 100mg");
     expect(llmMock.callStructured).toHaveBeenCalled();
@@ -61,9 +64,9 @@ describe("Medicine Analyzer API", () => {
 
   it("returns 422 when llm flags payload as non-medicine label", async () => {
     llmMock.callStructured.mockResolvedValue({
+      input_type: "unknown",
       is_medicine_label: false,
-      drug_name: null,
-      recommendations: [],
+      medicines: []
     });
     mockFetch.mockResolvedValueOnce({
       ok: true,

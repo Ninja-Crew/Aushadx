@@ -13,14 +13,24 @@ process.env.PINECONE_INDEX_HOST = "dummy";
 // Mock the LLM and RAG clients for a predictable integration test
 const mockLlmClient = {
   callStructured: jest.fn().mockResolvedValue({
+    input_type: "medicine_label",
     is_medicine_label: true,
-    drug_name: "Integration Test Drug",
-    recommendations: ["Take with water"],
+    medicines: [
+      {
+        drug_name: "Integration Test Drug",
+        recommendations: ["Take with water"],
+      }
+    ]
   }),
   callGeminiStructured: jest.fn().mockResolvedValue({
+    input_type: "medicine_label",
     is_medicine_label: true,
-    drug_name: "Integration Test Drug",
-    recommendations: ["Take with water"],
+    medicines: [
+      {
+        drug_name: "Integration Test Drug",
+        recommendations: ["Take with water"],
+      }
+    ]
   })
 };
 
