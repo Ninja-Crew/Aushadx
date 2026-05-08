@@ -4,7 +4,7 @@ import morgan from "morgan";
 import authRoutes from "./routes/authRoutes.js";
 import profileRoutes from "./routes/profileRoutes.js";
 import errorMiddleware from "./middleware/errorMiddleware.js";
-
+import { initTwilio } from "./services/twilioService.js";
 import wellKnownRoutes from "./routes/wellKnownRoutes.js";
 import { initKeystore, startRotationSchedule } from "./utils/keys.js";
 
@@ -12,11 +12,18 @@ import { initKeystore, startRotationSchedule } from "./utils/keys.js";
 await initKeystore();
 startRotationSchedule();
 
+// Initialize Twilio
+initTwilio();
+
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 app.use(morgan("dev"));
+
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", service: "profile-manager" });
+});
 
 // Debug Middleware removed
 

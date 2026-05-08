@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import connectDB from './config/db.js';
-import { startScheduler } from './jobs/scheduler.js';
+import agenda, { startScheduler } from './jobs/scheduler.js';
 
 dotenv.config();
 
@@ -15,12 +15,12 @@ connectDB().then(() => {
 });
 
 // Handle graceful shutdown
-process.on('SIGTERM', () => {
-    console.log('[WORKER] SIGTERM received. Shutting down gracefully.');
+const gracefulShutdown = async () => {
+    console.log('[WORKER] Shutdown received. Stopping Agenda...');
+    await agenda.stop();
+    console.log('[WORKER] Agenda stopped. Exiting.');
     process.exit(0);
-});
+};
 
-process.on('SIGINT', () => {
-    console.log('[WORKER] SIGINT received. Shutting down gracefully.');
-    process.exit(0);
-});
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);

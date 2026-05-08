@@ -28,6 +28,7 @@ const AgentScreen = ({ route, navigation }) => {
   const [input, setInput] = useState('');
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [isConnected, setIsConnected] = useState(false);
+  const [isAgentProcessing, setIsAgentProcessing] = useState(false);
   const [isHistoryVisible, setHistoryVisible] = useState(false);
   const [chatHistory, setChatHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -134,7 +135,12 @@ const AgentScreen = ({ route, navigation }) => {
     // Build a fresh WS URL using the latest access token from storage
     const getWsUrl = async () => {
       const currentToken = await getToken();
-      return `${wsUrlString.replace(/\/$/, '')}/ws?token=${currentToken}&chatId=${currentChatId}`;
+      let tz = 'UTC';
+      try {
+        tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      } catch (e) {}
+      const tzOffset = new Date().getTimezoneOffset();
+      return `${wsUrlString.replace(/\/$/, '')}/ws?token=${currentToken}&chatId=${currentChatId}&tz=${encodeURIComponent(tz)}&tzOffset=${tzOffset}`;
     };
 
     // Refresh access token via stored refresh token
@@ -175,20 +181,71 @@ const AgentScreen = ({ route, navigation }) => {
       };
 
       ws.current.onmessage = (e) => {
-        const text = e.data;
-        setMessages(prev => {
-          const newMessages = [...prev];
-          const lastIdx = newMessages.length - 1;
-          if (newMessages.length > 0 && !newMessages[lastIdx].isUser && newMessages[lastIdx].id !== '__status__') {
-            newMessages[lastIdx] = { ...newMessages[lastIdx], text: newMessages[lastIdx].text + text };
-          } else {
-            // Remove the status message if we are appending a new message and just got a reply
-            const filtered = newMessages.filter(m => m.id !== '__status__');
-            filtered.push({ id: Math.random().toString(), text, isUser: false });
-            return filtered;
+        try {
+          const payload = JSON.parse(e.data);
+          const { type, text, requestId, label, title } = payload;
+          
+          if (type === 'chat_title') {
+            setChatHistory(prev => prev.map(c => c.chat_id === currentChatId ? { ...c, title } : c));
+            return;
           }
-          return newMessages;
-        });
+
+          setMessages(prev => {
+            const newMessages = [...prev];
+            const aiIdx = newMessages.findIndex(m => m.id === requestId);
+            
+            if (aiIdx !== -1) {
+              if (type === 'message') {
+                newMessages[aiIdx] = { ...newMessages[aiIdx], text: newMessages[aiIdx].text + text, status: 'processing' };
+              } else if (type === 'tool_start') {
+                newMessages[aiIdx] = { ...newMessages[aiIdx], toolLabel: label, status: 'processing' };
+              } else if (type === 'tool_end') {
+                newMessages[aiIdx] = { ...newMessages[aiIdx], status: 'processing' }; // Intentionally leaving toolLabel intact during the LLM translation latency
+              } else if (type === 'done' || type === 'error') {
+                newMessages[aiIdx] = { ...newMessages[aiIdx], status: 'done', toolLabel: null };
+                if (type === 'error' && text) {
+                   newMessages[aiIdx].text += '\n[Error: ' + text + ']';
+                }
+                
+                const nextQueuedIdx = newMessages.findIndex(m => m.status === 'queued');
+                if (nextQueuedIdx !== -1) {
+                  newMessages[nextQueuedIdx] = { ...newMessages[nextQueuedIdx], status: 'processing' };
+                } else {
+                  setIsAgentProcessing(false);
+                }
+              }
+            } else {
+               // Fallback
+               if (type === 'message' || !type) {
+                 const fallbackText = type === 'message' ? text : String(payload);
+                 const filtered = newMessages.filter(m => m.id !== '__status__');
+                 const lastIdx = filtered.length - 1;
+                 if (filtered.length > 0 && !filtered[lastIdx].isUser && filtered[lastIdx].id !== '__status__') {
+                   filtered[lastIdx] = { ...filtered[lastIdx], text: filtered[lastIdx].text + fallbackText };
+                 } else {
+                   filtered.push({ id: Math.random().toString(), text: fallbackText, isUser: false });
+                 }
+                 return filtered;
+               }
+            }
+            return newMessages;
+          });
+        } catch (err) {
+          // Fallback for raw text
+          const text = e.data;
+          setMessages(prev => {
+            const newMessages = [...prev];
+            const lastIdx = newMessages.length - 1;
+            if (newMessages.length > 0 && !newMessages[lastIdx].isUser && newMessages[lastIdx].id !== '__status__') {
+              newMessages[lastIdx] = { ...newMessages[lastIdx], text: newMessages[lastIdx].text + text };
+            } else {
+              const filtered = newMessages.filter(m => m.id !== '__status__');
+              filtered.push({ id: Math.random().toString(), text, isUser: false });
+              return filtered;
+            }
+            return newMessages;
+          });
+        }
       };
 
       ws.current.onerror = (e) => {
@@ -258,15 +315,27 @@ const AgentScreen = ({ route, navigation }) => {
     if (!input.trim() || !isConnected) return;
 
     const msg = input.trim();
+    const requestId = generateUUID();
     
-    // When sending a message, remove the __status__ if it is "Connected to Agent" so it doesn't clutter
     setMessages(prev => {
       const filtered = prev.filter(m => m.id !== '__status__');
-      return [...filtered, { id: Math.random().toString(), text: msg, isUser: true }];
+      const userMsg = { id: Math.random().toString(), text: msg, isUser: true };
+      const aiMsg = { 
+        id: requestId, 
+        text: '', 
+        isUser: false, 
+        status: isAgentProcessing ? 'queued' : 'processing',
+        toolLabel: null
+      };
+      return [...filtered, userMsg, aiMsg];
     });
 
+    if (!isAgentProcessing) {
+       setIsAgentProcessing(true);
+    }
+
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ message: msg }));
+      ws.current.send(JSON.stringify({ message: msg, requestId }));
     } else {
       console.log("WS not open");
     }
@@ -280,7 +349,13 @@ const AgentScreen = ({ route, navigation }) => {
           data={messages}
           keyExtractor={item => item.id.toString()}
           renderItem={({ item }) => (
-            <ChatMessage message={item.text} isUser={item.isUser} />
+            <ChatMessage 
+              message={item.text} 
+              isUser={item.isUser} 
+              status={item.status} 
+              toolLabel={item.toolLabel} 
+              isStatus={item.isStatus} 
+            />
           )}
           contentContainerStyle={styles.list}
           style={{ flex: 1 }}
@@ -310,7 +385,13 @@ const AgentScreen = ({ route, navigation }) => {
         </View>
 
         <Modal visible={isHistoryVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setHistoryVisible(false)}>
-          <View style={{flex: 1, backgroundColor: colors.background, paddingTop: Platform.OS === 'ios' ? 40 : 20, paddingHorizontal: 20}}>
+          <View style={{
+            flex: 1, 
+            backgroundColor: colors.background, 
+            paddingTop: Math.max(insets.top, Platform.OS === 'ios' ? 40 : 20), 
+            paddingBottom: insets.bottom + 10,
+            paddingHorizontal: 20
+          }}>
             <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20}}>
               <Text style={{fontSize: 22, fontWeight: 'bold', color: colors.text}}>Chat History</Text>
               <TouchableOpacity onPress={() => setHistoryVisible(false)}>

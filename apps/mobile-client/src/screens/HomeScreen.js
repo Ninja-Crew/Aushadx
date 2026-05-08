@@ -20,6 +20,7 @@ const HomeScreen = ({ navigation, route }) => {
   const [analyzing, setAnalyzing] = useState(false);
   const [text, setText] = useState('');
   const [imageUri, setImageUri] = useState(null);
+  const [imageBase64, setImageBase64] = useState(null);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [result, setResult] = useState(null);
   const [showResult, setShowResult] = useState(false);
@@ -51,13 +52,16 @@ const HomeScreen = ({ navigation, route }) => {
           Alert.alert('Permission Denied', 'Camera permission is required.');
           return;
         }
-        res = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.8 });
+        res = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.8, base64: true });
       } else {
-        res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.8 });
+        res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.8, base64: true });
       }
       if (!res.canceled && res.assets?.length > 0) {
         const uri = res.assets[0].uri;
         setImageUri(uri);
+        if (res.assets[0].base64) {
+          setImageBase64(res.assets[0].base64);
+        }
         setUnclearImage(false); // reset on new image
         performOCR(uri);
       }
@@ -89,11 +93,16 @@ const HomeScreen = ({ navigation, route }) => {
     setAnalyzing(true);
     setUnclearImage(false);
     try {
-      const data = await analyzeMedicine(token, { text });
+      const payload = { text };
+      if (imageBase64) {
+        payload.image = imageBase64;
+      }
+      const data = await analyzeMedicine(token, payload);
       setResult(data);
       setShowResult(true);
       setText(''); // clear text after successful analyze
       setImageUri(null); // clear image
+      setImageBase64(null); // clear base64
       AsyncStorage.setItem('@lastAnalysisResult', JSON.stringify(data)).catch(() => {});
     } catch (error) {
       const isUnclearLabel =
@@ -110,15 +119,18 @@ const HomeScreen = ({ navigation, route }) => {
     }
   };
 
-  const handleSchedule = (medicineDetails) => {
+  const handleSchedule = (medicineData) => {
     setShowResult(false);
+    // medicineData could be a single object or an array of objects
+    const remindersToSchedule = Array.isArray(medicineData) ? medicineData.map(m => ({
+      ...m
+    })) : {
+      ...medicineData
+    };
+
     navigation.navigate('AddEditReminder', { 
       token, 
-      reminderData: { 
-        medicineName: medicineDetails.medicineName,
-        dosage: medicineDetails.dosage,
-        frequency: 'DAILY' // default
-      }
+      reminderData: remindersToSchedule
     });
   };
 
@@ -139,7 +151,7 @@ const HomeScreen = ({ navigation, route }) => {
           </Text>
           <TouchableOpacity
             style={s.tryAgainBtn}
-            onPress={() => { setUnclearImage(false); setImageUri(null); setText(''); }}
+            onPress={() => { setUnclearImage(false); setImageUri(null); setImageBase64(null); setText(''); }}
           >
             <MaterialIcons name="refresh" size={20} color="#fff" />
             <Text style={s.tryAgainText}>Try Again</Text>
@@ -232,7 +244,7 @@ const HomeScreen = ({ navigation, route }) => {
                   onBlur={() => setIsInputFocused(false)}
                 />
                 <View style={s.ocrButtons}>
-                  <TouchableOpacity style={s.cancelButton} onPress={() => { setText(''); setImageUri(null); }}>
+                  <TouchableOpacity style={s.cancelButton} onPress={() => { setText(''); setImageUri(null); setImageBase64(null); }}>
                     <Text style={s.cancelButtonText}>Discard</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={s.analyzeButton} onPress={handleAnalyze}>
@@ -246,7 +258,7 @@ const HomeScreen = ({ navigation, route }) => {
         )}
 
         {/* Recent Result Section */}
-        {result && !text && !loading && !analyzing && (
+         {result && !text && !loading && !analyzing && (
            <View style={s.recentSection}>
              <Text style={s.sectionTitle}>Recent Analysis</Text>
              <TouchableOpacity 
@@ -259,10 +271,16 @@ const HomeScreen = ({ navigation, route }) => {
                </View>
                <View style={s.recentDetails}>
                  <Text style={[s.recentName, { color: colors.text }]} numberOfLines={1}>
-                   {result.analysis?.drug_name || 'Unknown Medicine'}
+                   {result.analyses && result.analyses.length > 0 
+                     ? (result.analyses.length === 1 
+                         ? result.analyses[0].drug_name || 'Unknown Medicine'
+                         : `${result.analyses.length} Medicines Found`)
+                     : (result.analysis?.drug_name || 'Unknown Medicine')}
                  </Text>
                  <Text style={[s.recentSub, { color: colors.textSecondary }]} numberOfLines={1}>
-                   {result.analysis?.primary_category || 'Medical Product'}
+                   {result.analyses && result.analyses.length > 1 
+                     ? 'Multiple Medical Products' 
+                     : (result.analyses?.[0]?.primary_category || result.analysis?.primary_category || 'Medical Product')}
                  </Text>
                </View>
                <MaterialIcons name="chevron-right" size={24} color={colors.textSecondary} />

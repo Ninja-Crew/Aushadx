@@ -9,10 +9,11 @@ const MAX_RETRIES = 3;
  * Calls Gemini with Structured Outputs based on a Zod schema.
  * @param {string} prompt - The prompt for the LLM.
  * @param {z.ZodSchema} zodSchema - The expected output schema.
+ * @param {object} options - Options including image.
  * @param {number} retries - Number of retries left.
  * @returns {Promise<any>} - The parsed JSON object matching the schema.
  */
-export async function callStructured(prompt, zodSchema, retries = MAX_RETRIES) {
+export async function callStructured(prompt, zodSchema, options = {}, retries = MAX_RETRIES) {
   let ai;
   if (env.GEMINI_PROVIDER === "vertexai") {
     if (!env.VERTEX_PROJECT || !env.VERTEX_LOCATION) {
@@ -43,6 +44,16 @@ export async function callStructured(prompt, zodSchema, retries = MAX_RETRIES) {
   delete schemaToPass.additionalProperties;
   delete schemaToPass.$schema;
 
+  const parts = [{ text: prompt }];
+  if (options.image) {
+    parts.push({
+      inlineData: {
+        data: options.image,
+        mimeType: "image/jpeg",
+      },
+    });
+  }
+
   for (let i = 0; i < retries; i++) {
     try {
       const response = await ai.models.generateContent({
@@ -50,7 +61,7 @@ export async function callStructured(prompt, zodSchema, retries = MAX_RETRIES) {
         contents: [
           {
             role: "user",
-            parts: [{ text: prompt }],
+            parts: parts,
           },
         ],
         config: {

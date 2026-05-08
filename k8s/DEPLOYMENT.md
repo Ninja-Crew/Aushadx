@@ -102,7 +102,7 @@ stringData:
 
   # Gemini / Google
   GEMINI_API_KEY: "AIza..."
-  GEMINI_MODEL:   "gemini-2.5-pro"
+  GEMINI_MODEL:   "gemini-2.5-flash"
 
   # Vertex AI provider switch
   GEMINI_PROVIDER: "vertexai"  # "vertexai" or "genai"
@@ -118,6 +118,9 @@ stringData:
   PINECONE_INDEX:      "medicine-knowledgebase"
   PINECONE_INDEX_HOST: "https://....svc.pinecone.io"
   PINECONE_NAMESPACE:  "medicine_kb_v1"
+
+  # Ngrok
+  NGROK_AUTHTOKEN: "your-ngrok-authtoken-here"
 ```
 
 > **MongoDB** is already included as a StatefulSet with a 5 Gi PVC. Data persists across pod restarts as long as the PVC is not deleted.
@@ -148,22 +151,24 @@ kubectl get pods -n aushadx -w
 
 ## 6. Connect the mobile client to the gateway
 
-The API gateway (`api-server`) is exposed on **NodePort 30000**.
+The API gateway (`api-server`) is exposed via an **ngrok tunnel**.
 
-With Docker Desktop, NodePorts are **directly accessible on `localhost`** — no tunnel or IP lookup needed.
+To get your active ngrok URL, find the ngrok pod and check its logs:
 
-Update **`apps/mobile-client/.env`**:
-
-```env
-# Simulator / web
-BASE_HOST=127.0.0.1
-PORT=30000
-
-# Android emulator (maps host loopback into the emulator)
-NETWORK_HOST=10.0.2.2
+```bash
+kubectl get pods -n aushadx -l app=ngrok
+kubectl logs -n aushadx -l app=ngrok | grep "url="
 ```
 
-> **Physical Android device on the same Wi-Fi:** use your machine's actual LAN IP address (e.g. `192.168.1.x`) instead of `127.0.0.1`.
+Update **`apps/mobile-client/.env`** with the ngrok URL (do not include trailing slash):
+
+```env
+# Point to your active ngrok tunnel URL
+EXPO_PUBLIC_API_URL=https://<your-ngrok-id>.ngrok-free.app/api/v1
+EXPO_PUBLIC_WS_URL=wss://<your-ngrok-id>.ngrok-free.app/api/v1/agent/ws
+```
+
+> **Note:** The exact environment variables depend on your mobile app's configuration. Ensure it points to the generated ngrok HTTPS endpoint.
 
 ---
 
@@ -239,14 +244,15 @@ You can use the official Kubernetes Dashboard to visually monitor and manage pod
 | Service | Internal DNS | Port |
 |---------|-------------|------|
 | mongodb (StatefulSet) | `mongodb.aushadx.svc.cluster.local` | 27017 |
-| api-server (gateway) | `api-server.aushadx.svc.cluster.local` | 3000 → NodePort **30000** → `localhost:30000` |
+| api-server (gateway) | `api-server.aushadx.svc.cluster.local` | 3000 (Exposed via ngrok) |
 | profile-manager | `profile-manager.aushadx.svc.cluster.local` | 3001 |
 | medicine-analyzer | `medicine-analyzer.aushadx.svc.cluster.local` | 3002 |
 | medicine-scheduler | `medicine-scheduler.aushadx.svc.cluster.local` | 3003 |
 | medicine-scheduler-worker | *No internal service (Daemon)* | N/A |
 | agent-service | `agent-service.aushadx.svc.cluster.local` | 3004 |
+| ngrok | *No internal service* | N/A |
 
-Only `api-server` is reachable from outside the cluster. All other services communicate internally via Kubernetes DNS.
+The cluster is sealed off from direct external traffic. The `api-server` is only accessible externally via the `ngrok` tunnel pod.
 
 ### Inspecting MongoDB
 

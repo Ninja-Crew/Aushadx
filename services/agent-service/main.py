@@ -89,9 +89,13 @@ async def websocket_endpoint(websocket: WebSocket):
         import uuid
         chat_id = str(uuid.uuid4())
     
+    client_timezone = websocket.query_params.get("tz") or "UTC"
+    client_tz_offset = websocket.query_params.get("tzOffset")
+    
     # thread_id = chat session ID (used by LangGraph checkpointer for memory)
     # user_id is stored separately so tools can access the real user identity
-    config = {"configurable": {"thread_id": chat_id, "user_id": user_id}}
+    # client_timezone is injected to ensure scheduling uses the device's actual exact time offset
+    config = {"configurable": {"thread_id": chat_id, "user_id": user_id, "client_timezone": client_timezone, "client_tz_offset": client_tz_offset}}
     chat_created_in_session = False
     
     try:
@@ -99,10 +103,11 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             logger.info(f"Received from {user_id}: {data}")
             
-            # Extract plain text from JSON payload 
+            requestId = None
             try:
                 parsed_data = json.loads(data)
                 user_message = parsed_data.get("message", data)
+                requestId = parsed_data.get("requestId")
             except json.JSONDecodeError:
                 user_message = data
             
@@ -111,29 +116,81 @@ async def websocket_endpoint(websocket: WebSocket):
                 if not chat_doc:
                     title = user_message[:30].strip() + ("..." if len(user_message) > 30 else "")
                     await create_chat(user_id=user_id, chat_id=chat_id, title=title)
+                    
+                    import asyncio
+                    from agent.graph import llm
+                    async def generate_title(c_id, u_id, u_msg):
+                        try:
+                            prompt = f"Generate a short, concise title (max 5 words) for a chat that starts with this user query: '{u_msg}'. Respond with ONLY the title. No quotes."
+                            response = await llm.ainvoke([HumanMessage(content=prompt)])
+                            new_title = response.content.strip().replace('"', '').replace("'", "")
+                            await update_chat_title(c_id, u_id, new_title)
+                            await manager.send_personal_message(json.dumps({"type": "chat_title", "title": new_title}), websocket)
+                        except Exception as e:
+                            logger.error(f"Failed to generate explicit chat title: {e}")
+                            
+                    asyncio.create_task(generate_title(chat_id, user_id, user_message))
                 else:
                     await update_chat_timestamp(chat_id, user_id)
                 chat_created_in_session = True
             else:
                 await update_chat_timestamp(chat_id, user_id)
 
-            # Normal chat turn
             inputs = {"messages": [HumanMessage(content=user_message)]}
             
-            # Resume graph execution
+            TOOL_LABELS = {
+                "get_upcoming_reminders": "Fetching reminders",
+                "get_pending_or_missed_reminders": "Checking missed doses",
+                "analyze_medicine": "Analyzing medicine",
+                "check_medicine_taken": "Verifying logs",
+                "check_schedule_complications": "Checking complications",
+                "schedule_reminder": "Scheduling reminder",
+                "update_reminder": "Updating schedule",
+                "generate_medical_summary": "Generating summary",
+                "get_current_datetime": "Checking time"
+            }
+            
             async for msg, metadata in graph.astream(inputs, config=config, stream_mode="messages"):
-                if msg.content:
-                    # Ignore tool messages being streamed, only send Assistant generated responses
-                    if getattr(msg, 'type', '') == 'ai':
+                if getattr(msg, 'type', '') == 'ai':
+                    if hasattr(msg, 'tool_call_chunks') and msg.tool_call_chunks:
+                        for chunk in msg.tool_call_chunks:
+                            if hasattr(chunk, 'get') and chunk.get("name"):
+                                tool_name = chunk["name"]
+                                label = TOOL_LABELS.get(tool_name, f"Running {tool_name}")
+                                payload = {"type": "tool_start", "label": label}
+                                if requestId: payload["requestId"] = requestId
+                                await manager.send_personal_message(json.dumps(payload), websocket)
+                    
+                    # Tool is now fully assigned and executed downstream
+                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                        for tcall in msg.tool_calls:
+                            if hasattr(tcall, 'get') and tcall.get("name"):
+                                tool_name = tcall["name"]
+                                label = TOOL_LABELS.get(tool_name, f"Running {tool_name}")
+                                payload = {"type": "tool_start", "label": label}
+                                if requestId: payload["requestId"] = requestId
+                                await manager.send_personal_message(json.dumps(payload), websocket)
+                    
+                    if hasattr(msg, 'content') and msg.content:
                         if isinstance(msg.content, str):
-                            await manager.send_personal_message(msg.content, websocket)
+                            payload = {"type": "message", "text": msg.content}
+                            if requestId: payload["requestId"] = requestId
+                            await manager.send_personal_message(json.dumps(payload), websocket)
                         elif isinstance(msg.content, list):
                             for item in msg.content:
                                 if isinstance(item, dict) and "text" in item:
-                                    await manager.send_personal_message(item["text"], websocket)
-                        else:
-                            await manager.send_personal_message(str(msg.content), websocket)
+                                    payload = {"type": "message", "text": item["text"]}
+                                    if requestId: payload["requestId"] = requestId
+                                    await manager.send_personal_message(json.dumps(payload), websocket)
+                                    
+                elif getattr(msg, 'type', '') == 'tool':
+                     payload = {"type": "tool_end"}
+                     if requestId: payload["requestId"] = requestId
+                     await manager.send_personal_message(json.dumps(payload), websocket)
             
+            done_payload = {"type": "done"}
+            if requestId: done_payload["requestId"] = requestId
+            await manager.send_personal_message(json.dumps(done_payload), websocket)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
@@ -141,7 +198,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocket error: {e}", exc_info=True)
         try:
-            await manager.send_personal_message(f"Error: {str(e)}", websocket)
+            await manager.send_personal_message(json.dumps({"type": "error", "text": str(e)}), websocket)
         except:
             pass
         manager.disconnect(websocket)

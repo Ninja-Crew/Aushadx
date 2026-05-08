@@ -6,7 +6,7 @@ This document explains how Google Maps API key restrictions work with Expo and E
 **No.** You do not need to update your API key restrictions every time you run `npx expo prebuild` or `eas build`, **as long as you use persistent credentials.**
 
 API key restrictions in Google Cloud Console rely on **two things**:
-1. Your App's Package Name (e.g., `com.anonymous.mobileclient`)
+1. Your App's Package Name (e.g., `com.aushadx.mobileclient`)
 2. The **SHA-1 Fingerprint** of the Keystore used to sign the `.apk` or `.aab`.
 
 The SHA-1 fingerprint changes *only if the Keystore changes*. 
@@ -61,8 +61,8 @@ To ensure your Google Maps API key always works locally and in production withou
 2. **Get EAS SHA-1:** Run `eas credentials` to get your production cloud fingerprint.
 3. **Go to Google Cloud Console:** Navigate to APIs & Services > Credentials.
 4. **Edit your Maps API Key:** Under "Application restrictions", choose Android apps.
-5. **Add Local Fingerprint:** Add an item with Package Name `com.anonymous.mobileclient` and your Local Debug SHA-1.
-6. **Add Production Fingerprint:** Add a *second* item with Package Name `com.anonymous.mobileclient` and your EAS Production SHA-1.
+5. **Add Local Fingerprint:** Add an item with Package Name `com.aushadx.mobileclient` and your Local Debug SHA-1.
+6. **Add Production Fingerprint:** Add a *second* item with Package Name `com.aushadx.mobileclient` and your EAS Production SHA-1.
 7. **Save.**
 
 From here on out, whether you `npx expo prebuild` 100 times, or run `eas build` 100 times, your Google maps will permanently work and remain securely restricted to your app!

@@ -26,6 +26,7 @@ const userSchema = new Schema(
       trim: true,
     },
     password: { type: String, required: true },
+    emailVerified: { type: Boolean, default: false },
 
     // Basic identity
     name: { type: String, required: true },
@@ -36,8 +37,8 @@ const userSchema = new Schema(
     date_of_birth: { type: Date },
     dateOfBirth: { type: Date }, // added for mobile client compatibility
     gender: { type: String, enum: GENDERS, default: "unknown" },
-    
-    // Extended Medical Info 
+
+    // Extended Medical Info
     medicalInfo: {
       bloodType: { type: String, enum: BLOOD_GROUPS, default: "unknown" },
       height: { type: Number },
@@ -77,7 +78,11 @@ userSchema.pre("save", async function () {
 
 // Ensure medical_history is always an array of strings
 userSchema.pre("save", async function () {
-  if (this.medicalInfo && this.medicalInfo.medical_history && !Array.isArray(this.medicalInfo.medical_history)) {
+  if (
+    this.medicalInfo &&
+    this.medicalInfo.medical_history &&
+    !Array.isArray(this.medicalInfo.medical_history)
+  ) {
     this.medicalInfo.medical_history = String(this.medicalInfo.medical_history)
       .split(",")
       .map((s) => s.trim())

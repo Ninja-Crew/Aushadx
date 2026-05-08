@@ -69,11 +69,25 @@ const Section = ({ icon, title, children, colors, helpText }) => {
 const AnalysisResultModal = ({ visible, result, onClose, onSchedule }) => {
   const { colors } = useTheme();
 
-  if (!result || !result.analysis) return null;
-  const a = result.analysis;
+  if (!result || (!result.analysis && !result.analyses)) return null;
+  const analysesList = result.analyses || (result.analysis ? [result.analysis] : []);
 
-  const confidenceColor = a.confidence?.level === 'high' ? colors.success
-    : a.confidence?.level === 'medium' ? '#FF9500' : colors.error;
+  const handleSchedulePress = () => {
+    if (onSchedule) {
+      const payload = analysesList.map(a => {
+        const schedule = a.extracted_schedule || {};
+        return {
+          medicineName: a.drug_name || '',
+          dosage: schedule.dosage || a.typical_dosage_range || '',
+          frequency: schedule.frequency && schedule.frequency !== 'UNKNOWN' ? schedule.frequency : 'DAILY',
+          frequencyValue: schedule.frequencyValue || '',
+          duration: schedule.duration && schedule.duration !== 'UNKNOWN' ? schedule.duration : 'SINGLE_DAY',
+          durationValue: schedule.durationValue || ''
+        };
+      });
+      onSchedule(payload);
+    }
+  };
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -81,15 +95,9 @@ const AnalysisResultModal = ({ visible, result, onClose, onSchedule }) => {
         {/* Header */}
         <View style={[styles.header, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.drugName, { color: colors.text }]}>{a.drug_name || 'Unknown'}</Text>
-            {a.confidence?.level && (
-              <View style={styles.confidenceRow}>
-                <View style={[styles.confidenceDot, { backgroundColor: confidenceColor }]} />
-                <Text style={[styles.confidenceText, { color: confidenceColor }]}>
-                  {a.confidence.level.toUpperCase()} CONFIDENCE
-                </Text>
-              </View>
-            )}
+            <Text style={[styles.drugName, { color: colors.text }]}>
+              {analysesList.length > 1 ? `${analysesList.length} Medicines Found` : (analysesList[0].drug_name || 'Unknown')}
+            </Text>
           </View>
           <TouchableOpacity onPress={onClose} style={[styles.closeBtn, { backgroundColor: colors.chip }]}>
             <MaterialIcons name="close" size={22} color={colors.text} />
@@ -97,6 +105,23 @@ const AnalysisResultModal = ({ visible, result, onClose, onSchedule }) => {
         </View>
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          {analysesList.map((a, index) => {
+            const confidenceColor = a.confidence?.level === 'high' ? colors.success
+              : a.confidence?.level === 'medium' ? '#FF9500' : colors.error;
+
+            return (
+              <View key={index} style={{ marginBottom: 24 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                  <Text style={{ fontSize: 20, fontWeight: 'bold', color: colors.primary, flex: 1 }}>{a.drug_name || 'Unknown'}</Text>
+                  {a.confidence?.level && (
+                    <View style={styles.confidenceRow}>
+                      <View style={[styles.confidenceDot, { backgroundColor: confidenceColor }]} />
+                      <Text style={[styles.confidenceText, { color: confidenceColor }]}>
+                        {a.confidence.level.toUpperCase()} CONFIDENCE
+                      </Text>
+                    </View>
+                  )}
+                </View>
 
           {/* Indications */}
           {a.indications?.length > 0 && (
@@ -184,23 +209,19 @@ const AnalysisResultModal = ({ visible, result, onClose, onSchedule }) => {
             </Section>
           )}
 
-          {/* Confidence Rationale */}
-          {/* {a.confidence?.rationale && (
-            <Section icon="psychology" title="Confidence Analysis" colors={colors} helpText="The AI's reasoning and confidence level regarding the extracted medicine information.">
-              <Text style={[styles.noteText, { color: colors.textSecondary }]}>{a.confidence.rationale}</Text>
-            </Section>
-          )} */}
+              </View>
+            );
+          })}
 
           {onSchedule && (
             <TouchableOpacity 
               style={[styles.scheduleBtn, { backgroundColor: colors.primary }]} 
-              onPress={() => onSchedule({
-                medicineName: a.drug_name || '',
-                dosage: a.typical_dosage_range || ''
-              })}
+              onPress={handleSchedulePress}
             >
               <MaterialIcons name="alarm-add" size={20} color="#fff" />
-              <Text style={styles.scheduleBtnText}>Schedule Medicine</Text>
+              <Text style={styles.scheduleBtnText}>
+                {analysesList.length > 1 ? 'Schedule All Medicines' : 'Schedule Medicine'}
+              </Text>
             </TouchableOpacity>
           )}
 

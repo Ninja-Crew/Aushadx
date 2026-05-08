@@ -6,7 +6,8 @@ import { getToken, getRefreshToken, saveToken, removeToken } from '../utils/stor
 import { navigate, replace, navigationRef } from '../navigation/navigationRef';
 
 // Use Expo config for environment variables
-const BASE_URL = Constants.expoConfig?.extra?.baseUrl || 'http://192.168.0.107:30000';
+const BASE_URL = Constants.expoConfig?.extra?.baseUrl || 'http://34.47.155.145';
+
 
 const getBaseUrl = () => {
   if (Platform.OS === 'android' && (BASE_URL.includes('localhost') || BASE_URL.includes('127.0.0.1'))) {
@@ -65,7 +66,14 @@ client.interceptors.response.use(
     const status = error.response?.status;
     const isAuthError = status === 401 || status === 403;
 
-    if (isAuthError && !originalRequest._retry) {
+    // Do not attempt to refresh token if the error is from login, register, or OTP endpoints
+    const isAuthEndpoint = originalRequest.url?.includes('/auth/login') || 
+                           originalRequest.url?.includes('/auth/register') ||
+                           originalRequest.url?.includes('/auth/verify-otp') ||
+                           originalRequest.url?.includes('/auth/verify-reset-otp') ||
+                           originalRequest.url?.includes('/auth/reset-password');
+
+    if (isAuthError && !originalRequest._retry && !isAuthEndpoint) {
       // If a refresh is already in-flight, queue this request
       if (isRefreshing) {
         return new Promise((resolve, reject) => {

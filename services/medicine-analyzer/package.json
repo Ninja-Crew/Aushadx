@@ -5,7 +5,10 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js test/ --verbose"
+    "test": "npm run test:unit && npm run test:component && npm run test:integration",
+    "test:unit": "node --experimental-vm-modules node_modules/jest/bin/jest.js test/unit/ --verbose",
+    "test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js test/integration/ --verbose",
+    "test:component": "node --experimental-vm-modules node_modules/jest/bin/jest.js test/component/ --verbose"
   },
   "dependencies": {
     "@google/genai": "^1.39.0",

@@ -6,9 +6,9 @@ This service provides an AI agent interface for AushadX, leveraging Google's Gem
 
 - **Natural Language Understanding**: Uses Gemini 1.5 Flash.
 - **Tool Use**: Can call other services to:
-    - Analyze medicines.
-    - Schedule reminders.
-    - Retrieve medical profiles.
+  - Analyze medicines.
+  - Schedule reminders.
+  - Retrieve medical profiles.
 - **Stateful Conversations**: Uses LangGraph to maintain conversation context.
 
 ## Setup
@@ -40,6 +40,7 @@ This service provides an AI agent interface for AushadX, leveraging Google's Gem
 ### POST /api/agent/chat
 
 Request:
+
 ```json
 {
   "message": "Schedule 500mg paracetamol at 9am daily",
@@ -48,6 +49,7 @@ Request:
 ```
 
 Response:
+
 ```json
 {
   "response": "I have scheduled Paracetamol (500mg) for 9:00 AM daily."
@@ -57,3 +59,12 @@ Response:
 ### Docs
 
 Swagger UI available at `http://localhost:3004/docs`
+
+## Testing
+
+```bash
+pytest
+```
+
+Reusable test fixtures live in `tests/mocks`.
+Detailed positive and negative scenarios are documented in `TEST_SCENARIOS.md`.
