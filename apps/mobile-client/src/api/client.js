@@ -6,7 +6,7 @@ import { getToken, getRefreshToken, saveToken, removeToken } from '../utils/stor
 import { navigate, replace, navigationRef } from '../navigation/navigationRef';
 
 // Use Expo config for environment variables
-const BASE_URL = Constants.expoConfig?.extra?.baseUrl || 'http://34.47.155.145';
+const BASE_URL = Constants.expoConfig?.extra?.baseUrl || 'https://sumptuous-mauro-scribbly.ngrok-free.dev';
 
 
 const getBaseUrl = () => {
@@ -17,7 +17,9 @@ const getBaseUrl = () => {
   return BASE_URL;
 };
 
-const EXTRA_HEADERS = Constants.expoConfig?.extra?.apiHeaders || {};
+const EXTRA_HEADERS = Constants.expoConfig?.extra?.apiHeaders || {
+  "ngrok-skip-browser-warning": "true"
+};
 
 const client = axios.create({
   baseURL: getBaseUrl(),

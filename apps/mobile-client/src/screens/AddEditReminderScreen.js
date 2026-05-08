@@ -91,6 +91,28 @@ const convertUTCToLocal = (utcStr) => {
 };
 
 const createDefaultForm = (data = {}) => {
+  const initialFrequency = data.frequency || "ONCE";
+  const initialFrequencyValue = data.frequencyValue ? String(data.frequencyValue) : "";
+  
+  let initialTimes = data.specificTimes?.length > 0 
+    ? data.specificTimes.map(convertUTCToLocal) 
+    : data.time 
+      ? [convertUTCToLocal(new Date(data.time).toISOString().split("T")[1].slice(0, 5))] 
+      : ["--:--"];
+
+  const multiTimeFrequencies = ["X_TIMES_DAILY", "DAILY", "SPECIFIC_WEEK_DAYS", "SPECIFIC_DAYS_OF_MONTH"];
+  if (multiTimeFrequencies.includes(initialFrequency) && initialFrequencyValue) {
+    const count = parseInt(initialFrequencyValue, 10);
+    if (!isNaN(count) && count > 0) {
+      if (initialTimes.length < count) {
+        const toAdd = count - initialTimes.length;
+        initialTimes = initialTimes.concat(Array(toAdd).fill("--:--"));
+      } else if (initialTimes.length > count) {
+        initialTimes = initialTimes.slice(0, count);
+      }
+    }
+  }
+
   return {
     id: data._id || Math.random().toString(36).substring(7),
     isEdit: !!data._id,
@@ -102,11 +124,11 @@ const createDefaultForm = (data = {}) => {
     // Core Data
     medicineName: data.medicineName || "",
     dosage: data.dosage || "",
-    frequency: data.frequency || "ONCE",
-    frequencyValue: data.frequencyValue ? String(data.frequencyValue) : "",
+    frequency: initialFrequency,
+    frequencyValue: initialFrequencyValue,
     specificWeekDays: data.specificWeekDays || [],
     specificDaysOfMonth: Array.isArray(data.specificDaysOfMonth) ? data.specificDaysOfMonth : data.specificDayOfMonth ? [data.specificDayOfMonth] : [],
-    specificTimes: data.specificTimes?.length > 0 ? data.specificTimes.map(convertUTCToLocal) : data.time ? [convertUTCToLocal(new Date(data.time).toISOString().split("T")[1].slice(0, 5))] : [getCurrentTimeStr()],
+    specificTimes: initialTimes,
     onceDate: data.startDate ? formatLocalDate(new Date(data.startDate)) : data.time ? formatLocalDate(new Date(data.time)) : getCurrentDateStr(),
     duration: data.duration || "SINGLE_DAY",
     durationValue: data.durationValue ? String(data.durationValue) : "",
@@ -126,6 +148,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
   const [forms, setForms] = useState([]);
   const [globalSaving, setGlobalSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [activeTimePicker, setActiveTimePicker] = useState(null); // { formId, index }
 
   useEffect(() => {
     if (reminderData) {
@@ -150,7 +173,7 @@ const AddEditReminderScreen = ({ route, navigation }) => {
               let newTimes = [...updatedForm.specificTimes];
               if (newTimes.length < count) {
                 const toAdd = count - newTimes.length;
-                const extra = Array(toAdd).fill(getCurrentTimeStr());
+                const extra = Array(toAdd).fill("--:--");
                 newTimes = newTimes.concat(extra);
               } else if (newTimes.length > count) {
                 newTimes = newTimes.slice(0, count);
@@ -226,32 +249,46 @@ const AddEditReminderScreen = ({ route, navigation }) => {
         errors.time_0 = "Please provide valid time(s)";
       } else {
         form.specificTimes.forEach((time, index) => {
-          if (!timeRegex.test(time))
+          if (time === "--:--") {
+            errors[`time_${index}`] = "Please select a time";
+          } else if (!timeRegex.test(time)) {
             errors[`time_${index}`] = "Invalid time format (HH:MM)";
+          }
         });
       }
     } else {
-      if (!timeRegex.test(form.specificTimes[0] || "")) {
+      if (form.specificTimes[0] === "--:--") {
+        errors.time_0 = "Please select a time";
+      } else if (!timeRegex.test(form.specificTimes[0] || "")) {
         errors.time_0 = "Invalid time format (HH:MM)";
       }
     }
 
     if (!form.onceDate && !form.isEdit) {
       errors.dateTime = "Start Date is required";
-    } else if (form.onceDate && !errors.time_0) {
+    } else if (form.onceDate) {
       if (!form.isEdit || form.dateTimeModified || form.showSubmitValidation) {
         const now = new Date();
         now.setSeconds(0, 0);
         const todayDate = parseLocalDate(formatLocalDate(now));
         const selectedDay = parseLocalDate(form.onceDate);
-        const selectedDate = combineLocalDateAndTime(form.onceDate, form.specificTimes[0] || "00:00");
         
-        if (!selectedDate) {
+        if (!selectedDay) {
           errors.dateTime = "Start Date is invalid";
-        } else if (!form.isEdit && selectedDate < now) {
-          errors.dateTime = "Start Date and time cannot be in the past";
-        } else if (form.isEdit && selectedDay && todayDate && selectedDay >= todayDate && selectedDate < now) {
-          errors.dateTime = "Start Date and time cannot be in the past";
+        } else if (!form.isEdit && selectedDay < todayDate) {
+          errors.dateTime = "Start Date cannot be in the past";
+        } else {
+          // Check individual times
+          form.specificTimes.forEach((time, index) => {
+              if (time !== "--:--" && timeRegex.test(time)) {
+                  const selectedDate = combineLocalDateAndTime(form.onceDate, time);
+                  if (selectedDate && selectedDate < now && selectedDay.getTime() === todayDate.getTime()) {
+                      if (!form.isEdit || form.dateTimeModified) {
+                          errors[`time_${index}`] = "Time cannot be in the past";
+                      }
+                  }
+              }
+          });
         }
       }
     }
@@ -596,14 +633,15 @@ const AddEditReminderScreen = ({ route, navigation }) => {
             {form.frequency === "ONCE" ? (
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Time to Take (HH:MM) *</Text>
-                <TextInput
-                  style={[styles.input, (currentErrors.time_0 || currentErrors.dateTime) && { borderColor: colors.error }]}
-                  value={form.specificTimes[0]}
-                  onChangeText={(text) => updateTime(form, 0, text)}
-                  placeholder="08:00"
-                  placeholderTextColor={colors.textSecondary}
-                  maxLength={5}
-                />
+                <TouchableOpacity
+                  style={[styles.input, styles.dateButton, (currentErrors.time_0 || currentErrors.dateTime) && { borderColor: colors.error }]}
+                  onPress={() => setActiveTimePicker({ formId: form.id, index: 0 })}
+                >
+                  <Text style={{ color: form.specificTimes[0] === "--:--" ? colors.textSecondary : colors.text }}>
+                    {form.specificTimes[0]}
+                  </Text>
+                  <MaterialIcons name="access-time" size={18} color={colors.primary} />
+                </TouchableOpacity>
                 {currentErrors.time_0 && <Text style={styles.validationText}>{currentErrors.time_0}</Text>}
               </View>
             ) : null}
@@ -613,14 +651,15 @@ const AddEditReminderScreen = ({ route, navigation }) => {
                 <Text style={styles.label}>Times of Day (HH:MM) *</Text>
                 {form.specificTimes.map((time, tIdx) => (
                   <View key={tIdx} style={{ marginBottom: spacing.m }}>
-                    <TextInput
-                      style={[styles.input, currentErrors[`time_${tIdx}`] && { borderColor: colors.error }]}
-                      value={time}
-                      onChangeText={(text) => updateTime(form, tIdx, text)}
-                      placeholder="08:00"
-                      placeholderTextColor={colors.textSecondary}
-                      maxLength={5}
-                    />
+                    <TouchableOpacity
+                      style={[styles.input, styles.dateButton, currentErrors[`time_${tIdx}`] && { borderColor: colors.error }]}
+                      onPress={() => setActiveTimePicker({ formId: form.id, index: tIdx })}
+                    >
+                      <Text style={{ color: time === "--:--" ? colors.textSecondary : colors.text }}>
+                        {time}
+                      </Text>
+                      <MaterialIcons name="access-time" size={18} color={colors.primary} />
+                    </TouchableOpacity>
                     {currentErrors[`time_${tIdx}`] && <Text style={[styles.validationText, { marginTop: 4 }]}>{currentErrors[`time_${tIdx}`]}</Text>}
                   </View>
                 ))}
@@ -630,14 +669,15 @@ const AddEditReminderScreen = ({ route, navigation }) => {
             {form.frequency !== "ONCE" && !["X_TIMES_DAILY", "DAILY", "SPECIFIC_WEEK_DAYS", "SPECIFIC_DAYS_OF_MONTH"].includes(form.frequency) && (
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Start Time (HH:MM) *</Text>
-                <TextInput
-                  style={[styles.input, currentErrors.time_0 && { borderColor: colors.error }]}
-                  value={form.specificTimes[0]}
-                  onChangeText={(text) => updateTime(form, 0, text)}
-                  placeholder="08:00"
-                  placeholderTextColor={colors.textSecondary}
-                  maxLength={5}
-                />
+                <TouchableOpacity
+                  style={[styles.input, styles.dateButton, currentErrors.time_0 && { borderColor: colors.error }]}
+                  onPress={() => setActiveTimePicker({ formId: form.id, index: 0 })}
+                >
+                  <Text style={{ color: form.specificTimes[0] === "--:--" ? colors.textSecondary : colors.text }}>
+                    {form.specificTimes[0]}
+                  </Text>
+                  <MaterialIcons name="access-time" size={18} color={colors.primary} />
+                </TouchableOpacity>
                 {currentErrors.time_0 && <Text style={styles.validationText}>{currentErrors.time_0}</Text>}
               </View>
             )}
@@ -781,6 +821,41 @@ const AddEditReminderScreen = ({ route, navigation }) => {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+      
+      {activeTimePicker && (
+        <DateTimePicker
+          value={(() => {
+             const f = forms.find(f => f.id === activeTimePicker.formId);
+             if (!f) return new Date();
+             const timeStr = f.specificTimes[activeTimePicker.index];
+             if (!timeStr || timeStr === "--:--") return new Date();
+             const [h, m] = timeStr.split(":").map(Number);
+             const d = new Date();
+             d.setHours(h, m, 0, 0);
+             return d;
+          })()}
+          mode="time"
+          display="default"
+          onChange={(event, selectedDate) => {
+            const currentActive = activeTimePicker;
+            if (Platform.OS !== "ios") setActiveTimePicker(null);
+            if (event.type === "set" && selectedDate && currentActive) {
+              const formToUpdate = forms.find(f => f.id === currentActive.formId);
+              if (formToUpdate) {
+                const timeStr = `${selectedDate.getHours().toString().padStart(2, "0")}:${selectedDate.getMinutes().toString().padStart(2, "0")}`;
+                updateTime(formToUpdate, currentActive.index, timeStr);
+              }
+            }
+          }}
+        />
+      )}
+      {Platform.OS === 'ios' && activeTimePicker && (
+        <View style={styles.iosPickerHeader}>
+            <TouchableOpacity onPress={() => setActiveTimePicker(null)}>
+                <Text style={{color: colors.primary, fontWeight: 'bold', fontSize: 16}}>Done</Text>
+            </TouchableOpacity>
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -871,6 +946,14 @@ const makeStyles = (colors) => StyleSheet.create({
   saveBtnText: { color: "#FFF", fontSize: 16, fontWeight: "700" },
   cancelBtn: { backgroundColor: 'transparent' },
   cancelBtnText: { color: colors.textSecondary, fontSize: 16, fontWeight: "700" },
+  iosPickerHeader: {
+    padding: spacing.m,
+    backgroundColor: colors.card,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    alignItems: 'flex-end',
+    width: '100%'
+  }
 });
 
 export default AddEditReminderScreen;
