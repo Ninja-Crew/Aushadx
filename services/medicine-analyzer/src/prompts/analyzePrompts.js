@@ -1,12 +1,12 @@
 import { z } from "zod";
 
 export const medicineListSchema = z.object({
-  is_medicine_related: z.boolean(),
+  category: z.number(),
   medicines: z.array(z.record(z.any())).default([])
 });
 
 export const medicineSchema = z.object({
-  is_medicine_label: z.boolean(),
+  category: z.number(),
   drug_name: z.string().nullable(),
   indications: z.array(z.string()).default([]),
   recommended_dosage: z.object({
@@ -77,8 +77,8 @@ Follow these rules strictly.
 GENERAL RULES
 ----------------------
 
-1. First, determine if the provided text looks like it came from a real medicine label, package insert, or pharmaceutical product. Set \`is_medicine_label\` to \`true\` if so, otherwise \`false\`.
-2. If \`is_medicine_label\` is \`false\`, you may return empty/null values for all other fields — do not attempt to extract medicine information from non-medicine text.
+1. First, determine the category of the provided text: 1 for Medicine Label, 2 for Doctor's Prescription, -1 for Not a medicine-related text. Set \`category\` to 1, 2, or -1.
+2. If \`category\` is -1, you may return empty/null values for all other fields — do not attempt to extract medicine information from non-medicine text.
 3. Use retrieved medical knowledge if it is relevant.
 4. If RAG context is insufficient, rely on general pharmacology knowledge.
 5. Never fabricate unknown facts.
@@ -123,7 +123,7 @@ Return ONLY a valid JSON object.
 The JSON MUST strictly match this structure:
 
 {
-  "is_medicine_label": true | false,
+  "category": 1 | 2 | -1,
 
   "drug_name": "string",
 
@@ -217,11 +217,12 @@ Follow these rules strictly.
 ----------------------
 GENERAL RULES
 ----------------------
-1. Determine if the provided text or image contains any references to medicines, drugs, or pharmaceutical products. If so, set \`is_medicine_related\` to \`true\`. If not, set it to \`false\`.
+1. Determine the category of the provided text or image: 1 for a single Medicine Label/Package Insert, 2 for a Doctor's Prescription containing one or more medicines, -1 if it is not related to medicines. Set \`category\` to 1, 2, or -1.
 2. CRITICAL: The OCR text may be incomplete or contain errors, especially with handwritten doctor prescriptions. You must CAREFULLY EXAMINE the uploaded image alongside the OCR text.
-3. If \`is_medicine_related\` is \`true\`, extract EVERY distinct medicine mentioned in both the OCR text and the image. If you spot a medicine in the image (like doctor handwriting) that the OCR missed, YOU MUST INCLUDE IT.
-4. For each medicine, provide its \`medicine_name\` and a \`context_text\`.
-5. The \`context_text\` should include the specific sentences, bullet points, handwritten notes, or sections from the original OCR text/image that refer to this medicine, including dosage, side effects, or instructions. This will be used in a later step to analyze the medicine in detail.
+3. If \`category\` is 1 or 2, extract EVERY distinct medicine mentioned in both the OCR text and the image. If you spot a medicine in the image (like doctor handwriting) that the OCR missed, YOU MUST INCLUDE IT.
+4. EXCLUSION RULE: ONLY extract REAL, SPECIFIC MEDICINES (e.g., "Amoxicillin", "Tylenol"). DO NOT extract broad categories of medicines (e.g., "antibiotics", "painkillers"). DO NOT extract the individual contents or ingredients of a medicine if they are just listed as components (look for the actual brand/product name instead).
+5. For each medicine, provide its \`medicine_name\` and a \`context_text\`.
+6. The \`context_text\` should include the specific sentences, bullet points, handwritten notes, or sections from the original OCR text/image that refer to this medicine, including dosage, side effects, or instructions. This will be used in a later step to analyze the medicine in detail.
 
 ----------------------
 MEDICINE LABEL OCR / IMAGE CONTEXT
@@ -238,7 +239,7 @@ Return ONLY a valid JSON object.
 The JSON MUST strictly match this structure:
 
 {
-  "is_medicine_related": true | false,
+  "category": 1 | 2 | -1,
   "medicines": [
     {
       "medicine_name": "string",

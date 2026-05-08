@@ -89,6 +89,8 @@ const injectUserParam = (req, res, next) => {
    GLOBAL MIDDLEWARE
 =============================== */
 
+app.set("trust proxy", 1); // Trust the first proxy to get the real client IP for rate limiting
+
 app.use(cors());
 app.use(morgan("combined"));
 

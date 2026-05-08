@@ -18,38 +18,40 @@ export async function analyze(req, res) {
   try {
     logger.info("Performing Gemini-based medicine label analysis");
 
-    let medicalInfo = null;
+    let profilePromise = Promise.resolve(null);
     if (env.PROFILE_SERVICE_URL && user_id) {
-      try {
-        const profileRes = await fetch(
-          `${env.PROFILE_SERVICE_URL.replace(/\/$/, "")}/profile/medical-info/${user_id}`,
-          {
-            method: "GET",
-            headers: { "Content-Type": "application/json" },
-          },
-        );
-        if (profileRes.ok) {
-          const profileBody = await profileRes.json();
-          const profile = profileBody;
-          if (profile && profile.success === true) {
-            medicalInfo = profile.data.profile.medicalInfo || null;
-            logger.info({ 
-              message: "Profile retrieved from profile-service", 
-              hasMedicalInfo: !!medicalInfo
-            });
+      profilePromise = (async () => {
+        try {
+          const profileRes = await fetch(
+            `${env.PROFILE_SERVICE_URL.replace(/\/$/, "")}/profile/medical-info/${user_id}`,
+            {
+              method: "GET",
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+          if (profileRes.ok) {
+            const profileBody = await profileRes.json();
+            if (profileBody && profileBody.success === true) {
+              const info = profileBody.data.profile.medicalInfo || null;
+              logger.info({ 
+                message: "Profile retrieved from profile-service", 
+                hasMedicalInfo: !!info
+              });
+              return info;
+            } else {
+              logger.warn("Unsuccessful response body from profile service", profileBody);
+            }
           } else {
-            logger.warn("Unsuccessful response body from profile service", profileBody);
+            logger.warn(`Profile service returned non-OK status: ${profileRes.status}`);
           }
-        } else {
-          logger.warn(`Profile service returned non-OK status: ${profileRes.status}`);
+        } catch (err) {
+          logger.warn(
+            "Error while fetching profile from profile-service",
+            err.message || err,
+          );
         }
-      } catch (err) {
-        logger.warn(
-          "Error while fetching profile from profile-service",
-          err.message || err,
-        );
-        
-      }
+        return null;
+      })();
     }
 
     // Stage 1: Extract list of medicines
@@ -69,18 +71,25 @@ export async function analyze(req, res) {
     );
 
 
-    if (!extractionResult.is_medicine_related || !extractionResult.medicines || extractionResult.medicines.length === 0) {
+    if (extractionResult.category === -1 || !extractionResult.medicines || extractionResult.medicines.length === 0) {
       return res.status(422).json({
         error: "NOT_MEDICINE_LABEL",
         message: "The image does not appear to be of a prescription or a medicine label. Please try again with a clearer photo.",
       });
     }
 
-    // Stage 2: Analyze each extracted medicine
+    if (extractionResult.category === 1 && extractionResult.medicines.length > 0) {
+      // Medicine label: only keep the first medicine identified
+      extractionResult.medicines = [extractionResult.medicines[0]];
+    }
+
+    // Stage 2: Analyze each extracted medicine in parallel pipelines
     logger.info(`Stage 2: Analyzing ${extractionResult.medicines.length} extracted medicines`);
     
-    const contextsPromises = extractionResult.medicines.map(async (medicine) => {
-      // RAG Retrieval for specific medicine context
+    const medicalInfo = await profilePromise;
+
+    const pipelinePromises = extractionResult.medicines.map(async (medicine) => {
+      // 1. RAG Context obtaining
       let ragResults = [];
       try {
           logger.info(`Analyzing ${medicine.medicine_name}`);
@@ -90,49 +99,38 @@ export async function analyze(req, res) {
       } catch (err) {
           logger.warn(`RAG retrieval failed for ${medicine.medicine_name}, proceeding without it`, err);
       }
-      return { medicine, ragResults };
+
+      // 2. Prompt Ingestion
+      const specificMedicineData = {
+        ...medicine,
+        ocr_text: medicine.context_text,
+        name: medicine.medicine_name
+      };
+      const prompt = buildPrompt(specificMedicineData, medicalInfo, ragResults);
+
+      // 3. Gemini calling and medicine object creation
+      logger.info(`Calling LLM for detailed analysis of: ${medicine.medicine_name}`);
+      const analysis = await llmClient.callStructured(
+        prompt,
+        medicineSchema,
+        { image: imageBase64 }
+      );
+      
+      // 4. Refinement
+      if (!analysis.drug_name) {
+        analysis.drug_name = medicine.medicine_name;
+      }
+      
+      return analysis;
     });
 
-    const contexts = await Promise.all(contextsPromises);
-
-    const analyses = [];
-    const BATCH_SIZE = 3; // Process in batches to balance speed and API rate limits
-
-    for (let i = 0; i < contexts.length; i += BATCH_SIZE) {
-      const batch = contexts.slice(i, i + BATCH_SIZE);
-      
-      const batchPromises = batch.map(async (context) => {
-        const { medicine, ragResults } = context;
-
-        // Build prompt using specific medicine context
-        const specificMedicineData = {
-          ...medicine,
-          ocr_text: medicine.context_text,
-          name: medicine.medicine_name
-        };
-        const prompt = buildPrompt(specificMedicineData, medicalInfo, ragResults);
-
-        logger.info(`Calling LLM for detailed analysis of: ${medicine.medicine_name}`);
-        const analysis = await llmClient.callStructured(
-          prompt,
-          medicineSchema,
-          { image: imageBase64 }
-        );
-        
-        // Override the drug name if LLM didn't catch it well
-        if (!analysis.drug_name) {
-          analysis.drug_name = medicine.medicine_name;
-        }
-        
-        return analysis;
-      });
-
-      const batchResults = await Promise.all(batchPromises);
-      analyses.push(...batchResults);
-    }
+    const analyses = await Promise.all(pipelinePromises);
     
     // Filter out any analyses that the second stage deemed completely non-medicine
-    const validAnalyses = analyses.filter(a => a.is_medicine_label);
+    const validAnalyses = analyses.filter(a => a.category !== -1).map(a => ({
+      ...a,
+      is_medicine_label: true
+    }));
 
     if (validAnalyses.length === 0) {
       return res.status(422).json({

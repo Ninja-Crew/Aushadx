@@ -35,7 +35,7 @@ Local Docker images (aushadx/*)
 ### After (GKE)
 ```
 Artifact Registry images (us-central1-docker.pkg.dev/PROJECT/aushadx/*)
-  └── LoadBalancer Service for external access (auto-provisioned GCP LB)
+  └── ClusterIP Service exposed externally via Ngrok tunnel pod
   └── Workload Identity (keyless auth — no JSON keys)
        ├── aushadx-agent K8s SA  → aushadx-vertex@GKE_PROJECT GCP SA  (Vertex AI)
        └── aushadx-firebase-sa K8s SA → aushadx-firebase@FIREBASE_PROJECT GCP SA (Firebase)
@@ -232,7 +232,17 @@ kubectl create secret generic aushadx-secrets \
   --from-literal=PINECONE_INDEX="medicine-knowledgebase" \
   --from-literal=PINECONE_INDEX_HOST="<your-pinecone-host>" \
   --from-literal=PINECONE_NAMESPACE="medicine_kb_v1" \
+  --from-literal=NGROK_AUTHTOKEN="<your-ngrok-token>" \
   -n aushadx
+
+> **Tip to add a new key to an existing secret**:
+> If you already created `aushadx-secrets` and just need to add `NGROK_AUTHTOKEN`, run this one-liner (creates a temp file, patches, and deletes it to avoid quote escaping issues):
+>
+> **Windows (PowerShell):**
+> `Set-Content patch.json '{"stringData": {"NGROK_AUTHTOKEN": "<your-ngrok-token>"}}'; kubectl patch secret aushadx-secrets -n aushadx --patch-file patch.json; Remove-Item patch.json`
+> 
+> **Mac/Linux (Bash):**
+> `echo '{"stringData": {"NGROK_AUTHTOKEN": "<your-ngrok-token>"}}' > patch.json && kubectl patch secret aushadx-secrets -n aushadx --patch-file patch.json && rm patch.json`
 ```
 
 > ✅ **No** `vertex-ai-key` or `firebase-admin-key` secrets needed.
@@ -422,24 +432,23 @@ using a potentially stale cached image on the node.
 
 ---
 
-### 8.10 api-server Service — NodePort → LoadBalancer
+### 8.10 api-server Service — NodePort → ClusterIP
 
 ```diff
  spec:
 -  type: NodePort
-+  type: LoadBalancer
++  type: ClusterIP
    selector:
      app: api-server
    ports:
 -    - port: 3000
 -      targetPort: 3000
 -      nodePort: 30000
-+    - port: 80
++    - port: 3000
 +      targetPort: 3000
 ```
 
-The GCP Load Balancer will be provisioned automatically. Your mobile app hits port **80**
-on the external IP instead of `$(minikube ip):30000`.
+The `api-server` is only exposed internally via `ClusterIP`. External access is routed securely through the `ngrok` pod tunnel instead of a GCP Load Balancer.
 
 ---
 
@@ -481,18 +490,13 @@ mongodb-0                                   1/1     Running   0          2m
 profile-manager-xxxxxxxxx-xxxxx             1/1     Running   0          2m
 ```
 
-### 9.3 Get External IP
+### 9.3 Get Ngrok URL
 
 ```bash
-kubectl get svc -n aushadx api-server
+kubectl logs -n aushadx -l app=ngrok | grep "url="
 ```
 
-GCP takes ~2 minutes to provision the Load Balancer. The `EXTERNAL-IP` column starts as
-`<pending>` and resolves to a public IP. Update your mobile app's base URL to:
-
-```
-http://<EXTERNAL-IP>/
-```
+Look for the `url=https://<your-ngrok-id>.ngrok-free.app` output from the ngrok pod logs. Update your mobile app's base URL to this ngrok URL.
 
 ### 9.4 Verify Workload Identity
 
@@ -532,7 +536,7 @@ If either command returns the correct SA email, Workload Identity is working cor
 |---|---|---|
 | **Image source** | Local Docker daemon (`aushadx/*`) | Artifact Registry (`us-central1-docker.pkg.dev/PROJECT/aushadx/*`) |
 | **imagePullPolicy** | `IfNotPresent` | `Always` |
-| **External access** | NodePort `30000` on `$(minikube ip)` | LoadBalancer on port `80` (GCP-provisioned IP) |
+| **External access** | NodePort `30000` on `$(minikube ip)` | ClusterIP exposed via Ngrok tunnel |
 | **Vertex AI auth** | JSON key file mounted via `vertex-ai-key` Secret | Workload Identity (`aushadx-agent` K8s SA → `aushadx-vertex` GCP SA) |
 | **Firebase auth** | JSON key file mounted via `firebase-admin-key` Secret | Workload Identity (`aushadx-firebase-sa` K8s SA → `aushadx-firebase` GCP SA) |
 | **Secrets in YAML** | Inline `stringData` (dev only) | Managed externally via `kubectl create secret` |
@@ -553,9 +557,9 @@ If either command returns the correct SA email, Workload Identity is working cor
 - Check the pod's SA annotation: `kubectl describe sa aushadx-agent -n aushadx`
 - Ensure the cluster was created with `--workload-pool` (check: `gcloud container clusters describe aushadx --region=us-central1 | grep workloadPool`)
 
-### LoadBalancer stuck in `<pending>`
-- Check GCP quotas (external IP addresses): Console → IAM & Admin → Quotas
-- Verify billing is enabled on the project
+### Ngrok Pod crashing / not starting
+- Ensure you have correctly added `NGROK_AUTHTOKEN` to your `aushadx-secrets` in the cluster.
+- Check the logs: `kubectl logs -n aushadx -l app=ngrok`
 
 ### MongoDB PVC stuck in `Pending`
 - Confirm `standard-rwo` StorageClass exists: `kubectl get storageclass`

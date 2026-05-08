@@ -143,7 +143,7 @@ metadata:
   name: profile-manager
   namespace: aushadx
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: profile-manager
@@ -246,7 +246,7 @@ metadata:
   name: medicine-analyzer
   namespace: aushadx
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: medicine-analyzer
@@ -370,7 +370,7 @@ metadata:
   name: medicine-scheduler
   namespace: aushadx
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: medicine-scheduler
@@ -431,7 +431,7 @@ metadata:
   name: medicine-scheduler-worker
   namespace: aushadx
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: medicine-scheduler-worker
@@ -477,7 +477,7 @@ metadata:
   name: agent-service
   namespace: aushadx
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: agent-service
@@ -574,7 +574,7 @@ spec:
 
 ---
 # ════════════════════════════════════════════════════════════
-# api-server / API Gateway (port 3000) – GCP LoadBalancer
+# api-server / API Gateway (port 3000) – Exposed via Ngrok
 # ════════════════════════════════════════════════════════════
 apiVersion: apps/v1
 kind: Deployment
@@ -582,7 +582,7 @@ metadata:
   name: api-server
   namespace: aushadx
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: api-server
@@ -682,12 +682,75 @@ metadata:
   name: api-server
   namespace: aushadx
 spec:
-  type: LoadBalancer          # GCP provisions an external IP automatically
+  type: ClusterIP             # Changed from LoadBalancer to ClusterIP for ngrok tunnel
   selector:
     app: api-server
   ports:
-    - port: 80                # External port clients connect to
+    - port: 3000              # Internal service port
       targetPort: 3000        # Internal container port
+
+---
+# ════════════════════════════════════════════════════════════
+# ngrok (Tunnel to api-server)
+# ════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ngrok
+  namespace: aushadx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ngrok
+  template:
+    metadata:
+      labels:
+        app: ngrok
+    spec:
+      containers:
+        - name: ngrok
+          image: ngrok/ngrok:latest
+          args:
+            - "http"
+            - "api-server:3000"
+          env:
+            - name: NGROK_AUTHTOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aushadx-secrets
+                  key: NGROK_AUTHTOKEN
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+
+---
+# ════════════════════════════════════════════════════════════
+# NetworkPolicy: Restrict api-server access to ngrok only
+# ════════════════════════════════════════════════════════════
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-server-allow-ngrok
+  namespace: aushadx
+spec:
+  podSelector:
+    matchLabels:
+      app: api-server
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: ngrok
+      ports:
+        - protocol: TCP
+          port: 3000
 
 ---
 # ════════════════════════════════════════════════════════════
